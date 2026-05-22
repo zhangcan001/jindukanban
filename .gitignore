@@ -1,0 +1,41 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+*.db
+
+node_modules/
+dist/
+.vite/
+
+.env
+.env.local
+
+# Runtime artifacts
+*.log
+*.out.log
+*.err.log
+.runtime/
+logs/
+backend/uvicorn-*.log
+frontend/vite-*.log
+backend/_smoke_*.db
+backend/_alembic_*.db
+backend/uploads/
+backend/exports/
+backend/reports/
+backend/backups/
+
+# Packaging output (200MB+ artifacts not for source control)
+release/
+
+# User-generated data — kept locally only
+uploads/
+backups/
+reports/
+test_reports/
+exports/
+
+# Real project data — not for public repo
+机电进度计划-汽车科技总部产业园-*.xlsx
