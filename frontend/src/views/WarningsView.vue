@@ -91,7 +91,13 @@
       <template v-else>
         <div class="batch-panel">
           <span>已选 {{ selectedRows.length }} 项</span>
-          <el-button :disabled="!batchCreatableRows.length || batchCreating" :loading="batchCreating" type="primary" @click="batchCreateRectifications">
+          <el-button :disabled="!selectedRows.length || batchUpdating" :loading="batchUpdating" type="primary" @click="batchMarkResolution('handled')">
+            批量标记已处理
+          </el-button>
+          <el-button :disabled="!selectedRows.length || batchUpdating" :loading="batchUpdating" type="warning" plain @click="batchMarkResolution('ignored')">
+            批量忽略
+          </el-button>
+          <el-button :disabled="!batchCreatableRows.length || batchCreating" :loading="batchCreating" type="primary" plain @click="batchCreateRectifications">
             批量生成整改项（{{ batchCreatableRows.length }}）
           </el-button>
           <el-button :disabled="!selectedRows.length" @click="clearSelection">清除选择</el-button>
@@ -99,8 +105,8 @@
             {{ selectedRows.length - batchCreatableRows.length }} 项已存在整改项，将跳过
           </span>
         </div>
-        <el-table ref="recordsTableRef" v-loading="loading" :data="pagedRecords" height="560" empty-text="当前没有预警记录，说明当前筛选范围内暂无明显进度风险。" @row-click="openDetail" @selection-change="selectedRows = $event">
-        <el-table-column type="selection" width="42" :selectable="(row: WarningRecord) => !row.has_rectification" />
+        <el-table ref="recordsTableRef" v-loading="loading" :data="records" height="560" empty-text="当前没有预警记录，说明当前筛选范围内暂无明显进度风险。" @row-click="openDetail" @selection-change="selectedRows = $event">
+        <el-table-column type="selection" width="42" />
         <el-table-column label="级别" width="110">
           <template #default="{ row }">
             <el-tag :type="row.level_label === '严重预警' ? 'danger' : row.level_label === '提示' ? 'info' : 'warning'">
@@ -109,7 +115,9 @@
           </template>
         </el-table-column>
         <el-table-column label="状态" width="100">
-          <template #default="{ row }">{{ row.status_label ?? statusLabel(row.status) }}</template>
+          <template #default="{ row }">
+            <el-tag :type="statusTagType(row.status)" effect="plain">{{ row.status_label ?? statusLabel(row.status) }}</el-tag>
+          </template>
         </el-table-column>
         <el-table-column prop="discipline" label="专业" width="120" />
         <el-table-column prop="building" label="楼栋" width="110" />
@@ -131,21 +139,25 @@
         <el-table-column label="触发时间" width="170">
           <template #default="{ row }">{{ formatDateTime(row.created_at) }}</template>
         </el-table-column>
-        <el-table-column label="操作" width="150" fixed="right">
+        <el-table-column label="操作" width="210" fixed="right">
           <template #default="{ row }">
+            <el-button v-if="row.status === 'open'" size="small" @click.stop="markResolution(row, 'handled')">处理</el-button>
+            <el-button v-else size="small" plain @click.stop="markResolution(row, null)">取消处理</el-button>
             <el-button v-if="row.has_rectification" size="small" type="primary" @click.stop="router.push(`/projects/${projectId}/rectifications?keyword=${encodeURIComponent(row.task_name || '')}`)">查看整改项</el-button>
             <el-button v-else size="small" @click.stop="createFromWarning(row)">生成整改项</el-button>
           </template>
         </el-table-column>
       </el-table>
       <el-pagination
-        v-if="records.length"
+        v-if="totalRecords"
         v-model:current-page="page"
         v-model:page-size="pageSize"
         class="table-pagination"
         layout="total, sizes, prev, pager, next"
-        :total="records.length"
-        :page-sizes="[20, 50, 100]"
+        :total="totalRecords"
+        :page-sizes="[20, 50, 100, 200]"
+        @current-change="loadRecords"
+        @size-change="onPageSizeChange"
       />
       </template>
     </section>
@@ -178,9 +190,18 @@ import { ElMessage } from 'element-plus'
 
 import { getAnalyticsTrend } from '../api/analytics'
 import { createRectificationFromWarning } from '../api/rectifications'
-import { exportWarnings, listWarningFilterOptions, listWarningRules, listWarnings, runWarnings, updateWarningRule } from '../api/warnings'
+import {
+  batchUpdateWarnings,
+  exportWarnings,
+  listWarningFilterOptions,
+  listWarningRules,
+  listWarningsPage,
+  runWarnings,
+  updateWarningRule,
+  updateWarningStatus,
+} from '../api/warnings'
 import type { AnalyticsTrendPoint } from '../types/analytics'
-import type { WarningFilterOptions, WarningFilters, WarningRecord, WarningRule } from '../types/warning'
+import type { WarningFilterOptions, WarningFilters, WarningRecord, WarningResolutionType, WarningRule } from '../types/warning'
 
 const route = useRoute()
 const router = useRouter()
@@ -191,6 +212,7 @@ const selectedBatchId = ref<number | null>(null)
 const unresolvedOnly = ref(false)
 const rules = ref<WarningRule[]>([])
 const records = ref<WarningRecord[]>([])
+const totalRecords = ref(0)
 const filterOptions = ref<WarningFilterOptions>({
   disciplines: [],
   buildings: [],
@@ -207,6 +229,7 @@ const detailVisible = ref(false)
 const selectedRecord = ref<WarningRecord | null>(null)
 const selectedRows = ref<WarningRecord[]>([])
 const batchCreating = ref(false)
+const batchUpdating = ref(false)
 const recordsTableRef = ref<{ clearSelection: () => void } | null>(null)
 const filters = reactive<WarningFilters>({
   discipline: '',
@@ -225,7 +248,7 @@ const filteredFloorOptions = computed(() => {
   }
   return filterOptions.value.floors
 })
-const pagedRecords = computed(() => records.value.slice((page.value - 1) * pageSize.value, page.value * pageSize.value))
+const pagedRecords = computed(() => records.value)
 const batchCreatableRows = computed(() => selectedRows.value.filter((row) => !row.has_rectification))
 
 function batchLabel(batch: AnalyticsTrendPoint) {
@@ -259,13 +282,30 @@ async function handleBatchChange() {
 async function loadRecords() {
   loading.value = true
   try {
-    records.value = await listWarnings(projectId, selectedBatchId.value, unresolvedOnly.value, filters)
-    if ((page.value - 1) * pageSize.value >= records.value.length) page.value = 1
+    const result = await listWarningsPage(projectId, {
+      batchId: selectedBatchId.value,
+      unresolvedOnly: unresolvedOnly.value,
+      filters,
+      limit: pageSize.value,
+      offset: (page.value - 1) * pageSize.value,
+    })
+    records.value = result.records
+    totalRecords.value = result.total
+    if (page.value > 1 && !result.records.length && result.total > 0) {
+      page.value = 1
+      await loadRecords()
+    }
   } catch (error) {
     errorMessage.value = error instanceof Error ? error.message : '预警记录加载失败'
   } finally {
     loading.value = false
   }
+}
+
+function onPageSizeChange(size: number) {
+  pageSize.value = size
+  page.value = 1
+  void loadRecords()
 }
 
 async function runCurrentWarnings() {
@@ -366,6 +406,39 @@ async function batchCreateRectifications() {
 function clearSelection() {
   recordsTableRef.value?.clearSelection()
   selectedRows.value = []
+}
+
+async function markResolution(row: WarningRecord, type: WarningResolutionType) {
+  try {
+    const updated = await updateWarningStatus(projectId, row.id, { resolution_type: type })
+    Object.assign(row, updated)
+    ElMessage.success(type ? '已更新预警状态' : '已取消处理')
+  } catch (error) {
+    errorMessage.value = error instanceof Error ? error.message : '更新预警状态失败'
+  }
+}
+
+async function batchMarkResolution(type: WarningResolutionType) {
+  if (!selectedRows.value.length) return
+  batchUpdating.value = true
+  errorMessage.value = ''
+  try {
+    const ids = selectedRows.value.map((r) => r.id)
+    const result = await batchUpdateWarnings(projectId, { ids, resolution_type: type })
+    ElMessage.success(`已更新 ${result.updated_count} 条预警`)
+    clearSelection()
+    await loadRecords()
+  } catch (error) {
+    errorMessage.value = error instanceof Error ? error.message : '批量更新失败'
+  } finally {
+    batchUpdating.value = false
+  }
+}
+
+function statusTagType(status?: string | null) {
+  if (status === 'handled') return 'success'
+  if (status === 'ignored') return 'info'
+  return 'warning'
 }
 
 function levelLabel(level?: string | null) {

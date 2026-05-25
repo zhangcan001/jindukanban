@@ -1,5 +1,15 @@
 import { apiBaseUrl, buildApiError, normalizeNetworkError, request } from './http'
-import type { WarningFilterOptions, WarningFilters, WarningRecord, WarningRule, WarningRulePayload, WarningRunResponse } from '../types/warning'
+import type {
+  WarningFilterOptions,
+  WarningFilters,
+  WarningRecord,
+  WarningRecordBatchResult,
+  WarningRecordPage,
+  WarningResolutionType,
+  WarningRule,
+  WarningRulePayload,
+  WarningRunResponse,
+} from '../types/warning'
 
 function withQuery(path: string, params: Record<string, string | number | boolean | null | undefined>) {
   const search = new URLSearchParams()
@@ -53,6 +63,54 @@ export function listWarnings(projectId: number, batchId?: number | null, unresol
       keyword: filters.keyword,
     }),
   )
+}
+
+export function listWarningsPage(
+  projectId: number,
+  params: {
+    batchId?: number | null
+    unresolvedOnly?: boolean
+    filters?: WarningFilters
+    limit?: number
+    offset?: number
+  } = {},
+) {
+  const { batchId, unresolvedOnly = false, filters = {}, limit = 20, offset = 0 } = params
+  return request<WarningRecordPage>(
+    withQuery(`/api/projects/${projectId}/warnings/page`, {
+      batch_id: batchId,
+      unresolved_only: unresolvedOnly,
+      discipline: filters.discipline,
+      building: filters.building,
+      floor: filters.floor,
+      level: filters.level,
+      status: filters.status,
+      keyword: filters.keyword,
+      limit,
+      offset,
+    }),
+  )
+}
+
+export function updateWarningStatus(
+  projectId: number,
+  warningId: number,
+  payload: { resolution_type: WarningResolutionType; remark?: string | null },
+) {
+  return request<WarningRecord>(`/api/projects/${projectId}/warnings/${warningId}`, {
+    method: 'PATCH',
+    body: JSON.stringify(payload),
+  })
+}
+
+export function batchUpdateWarnings(
+  projectId: number,
+  payload: { ids: number[]; resolution_type: WarningResolutionType; remark?: string | null },
+) {
+  return request<WarningRecordBatchResult>(`/api/projects/${projectId}/warnings/batch-update`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
 }
 
 export function listWarningFilterOptions(projectId: number, batchId?: number | null) {

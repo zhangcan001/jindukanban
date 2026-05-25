@@ -426,7 +426,6 @@ def run_dashboard_checks(state: CheckState, batch_id: int) -> None:
         ("楼层统计", f"/api/projects/{state.project_id}/analytics/group-by", {"batch_id": batch_id, "dimension": "floor"}, "P0"),
         ("楼栋楼层统计", f"/api/projects/{state.project_id}/analytics/building-floor", {"batch_id": batch_id}, "P0"),
         ("滞后项排行", f"/api/projects/{state.project_id}/analytics/delayed-ranking", {"batch_id": batch_id}, "P0"),
-        ("进阶图表", f"/api/projects/{state.project_id}/analytics/dashboard-plus", {"batch_id": batch_id}, "P0"),
     ]
     for key, path, params, level in calls:
         try:

@@ -71,6 +71,27 @@ class WarningRunResponse(BaseModel):
     records: list[WarningRecordRead]
 
 
+class WarningRecordUpdate(BaseModel):
+    resolution_type: str | None = None  # "handled" | "ignored" | None(取消处理)
+    remark: str | None = None
+
+
+class WarningRecordBatchUpdate(BaseModel):
+    ids: list[int]
+    resolution_type: str | None = None
+    remark: str | None = None
+
+
+class WarningRecordBatchResult(BaseModel):
+    updated_count: int
+    skipped_ids: list[int] = []
+
+
+class WarningRecordPage(BaseModel):
+    total: int
+    records: list[WarningRecordRead]
+
+
 class WarningFilterOptions(BaseModel):
     disciplines: list[str] = []
     buildings: list[str] = []

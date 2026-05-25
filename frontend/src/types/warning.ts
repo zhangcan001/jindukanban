@@ -56,6 +56,18 @@ export type WarningRunResponse = {
   records: WarningRecord[]
 }
 
+export type WarningRecordPage = {
+  total: number
+  records: WarningRecord[]
+}
+
+export type WarningRecordBatchResult = {
+  updated_count: number
+  skipped_ids: number[]
+}
+
+export type WarningResolutionType = 'handled' | 'ignored' | null
+
 export type WarningFilters = {
   discipline?: string
   building?: string

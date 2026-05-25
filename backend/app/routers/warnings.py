@@ -1,4 +1,5 @@
 ﻿from io import BytesIO
+from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import StreamingResponse
@@ -15,7 +16,11 @@ from app.models.warning_record import WarningRecord
 from app.models.warning_rule import WarningRule
 from app.schemas.warning import (
     WarningFilterOptions,
+    WarningRecordBatchResult,
+    WarningRecordBatchUpdate,
+    WarningRecordPage,
     WarningRecordRead,
+    WarningRecordUpdate,
     WarningRuleCreate,
     WarningRuleRead,
     WarningRuleUpdate,
@@ -133,6 +138,44 @@ def list_warnings(
         status_filter=status_filter,
         keyword=keyword,
     )
+
+
+@router.get("/projects/{project_id}/warnings/page", response_model=WarningRecordPage)
+def list_warnings_page(
+    project_id: int,
+    batch_id: int | None = None,
+    unresolved_only: bool = Query(False),
+    discipline: str | None = None,
+    building: str | None = None,
+    floor: str | None = None,
+    level: str | None = None,
+    status_filter: str | None = Query(default=None, alias="status"),
+    keyword: str | None = None,
+    limit: int = Query(20, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+    db: Session = Depends(get_db),
+) -> WarningRecordPage:
+    """分页版预警列表。和 /warnings 共享筛选契约，但额外返回 total。
+
+    旧端点 /warnings 全量返回保持不变，避免 smoke-test / 测试套件回归。
+    前端 WarningsView 已切换到此端点，单项目预警上万条时仍能稳定加载。
+    """
+    get_project_or_404(project_id, db)
+    records = _query_warning_records(
+        db,
+        project_id=project_id,
+        batch_id=batch_id,
+        unresolved_only=unresolved_only,
+        discipline=discipline,
+        building=building,
+        floor=floor,
+        level=level,
+        status_filter=status_filter,
+        keyword=keyword,
+    )
+    total = len(records)
+    page = records[offset : offset + limit]
+    return WarningRecordPage(total=total, records=page)
 
 
 @router.get("/projects/{project_id}/warnings/filter-options", response_model=WarningFilterOptions)
@@ -263,6 +306,79 @@ def export_warnings(
     )
 
 
+def _apply_resolution(record: WarningRecord, resolution_type: str | None, remark: str | None) -> bool:
+    """更新单条预警的处理状态。
+
+    resolution_type:
+      "handled" → 标记为已处理
+      "ignored" → 标记为已忽略
+      None / "" / "open" → 取消处理
+    返回 True 表示状态有变更（用于统计 updated_count）。
+    """
+    normalized = (resolution_type or "").lower()
+    if normalized in {"", "open", "unhandled"}:
+        changed = record.is_resolved or record.resolution_type is not None
+        record.is_resolved = False
+        record.resolution_type = None
+        record.handled_at = None
+        if remark is not None:
+            record.remark = remark or None
+        return changed
+    if normalized not in {"handled", "ignored"}:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="resolution_type 仅支持 handled / ignored / 空（取消处理）")
+    changed = (not record.is_resolved) or record.resolution_type != normalized
+    record.is_resolved = True
+    record.resolution_type = normalized
+    if changed:
+        record.handled_at = datetime.utcnow()
+    if remark is not None:
+        record.remark = remark or None
+    return changed
+
+
+@router.patch("/projects/{project_id}/warnings/{warning_id}", response_model=WarningRecordRead)
+def update_warning_status(
+    project_id: int,
+    warning_id: int,
+    payload: WarningRecordUpdate,
+    db: Session = Depends(get_db),
+) -> WarningRecordRead:
+    get_project_or_404(project_id, db)
+    record = db.get(WarningRecord, warning_id)
+    if record is None or record.project_id != project_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="预警记录不存在")
+    _apply_resolution(record, payload.resolution_type, payload.remark)
+    db.commit()
+    db.refresh(record)
+    records = _query_warning_records(db, project_id=project_id, batch_id=record.batch_id)
+    for read in records:
+        if read.id == record.id:
+            return read
+    return _build_warning_read(record, None, None)
+
+
+@router.post("/projects/{project_id}/warnings/batch-update", response_model=WarningRecordBatchResult)
+def batch_update_warnings(
+    project_id: int,
+    payload: WarningRecordBatchUpdate,
+    db: Session = Depends(get_db),
+) -> WarningRecordBatchResult:
+    get_project_or_404(project_id, db)
+    if not payload.ids:
+        return WarningRecordBatchResult(updated_count=0, skipped_ids=[])
+    records = db.execute(
+        select(WarningRecord).where(WarningRecord.project_id == project_id, WarningRecord.id.in_(payload.ids))
+    ).scalars().all()
+    found_ids = {r.id for r in records}
+    skipped = [i for i in payload.ids if i not in found_ids]
+    updated_count = 0
+    for record in records:
+        if _apply_resolution(record, payload.resolution_type, payload.remark):
+            updated_count += 1
+    db.commit()
+    return WarningRecordBatchResult(updated_count=updated_count, skipped_ids=skipped)
+
+
 def _query_warning_records(
     db: Session,
     project_id: int,
@@ -294,8 +410,11 @@ def _query_warning_records(
         statement = statement.where(WarningRecord.level == level)
     if status_filter in {"open", "unhandled"}:
         statement = statement.where(WarningRecord.is_resolved.is_(False))
-    elif status_filter in {"handled", "ignored"}:
+    elif status_filter == "handled":
         statement = statement.where(WarningRecord.is_resolved.is_(True))
+        statement = statement.where(or_(WarningRecord.resolution_type.is_(None), WarningRecord.resolution_type != "ignored"))
+    elif status_filter == "ignored":
+        statement = statement.where(WarningRecord.is_resolved.is_(True), WarningRecord.resolution_type == "ignored")
     if discipline:
         statement = statement.where(ProgressItem.discipline == discipline)
     if building:
@@ -340,6 +459,13 @@ def _build_warning_read(
 ) -> WarningRecordRead:
     warning_message = _warning_message(record, item)
     is_resolved = bool(record.is_resolved)
+    resolution_type = (record.resolution_type or "").lower() if is_resolved else ""
+    if resolution_type == "ignored":
+        status_value, status_label = "ignored", "已忽略"
+    elif is_resolved:
+        status_value, status_label = "handled", "已处理"
+    else:
+        status_value, status_label = "open", "未处理"
     return WarningRecordRead(
         id=record.id,
         project_id=record.project_id,
@@ -350,8 +476,8 @@ def _build_warning_read(
         rule_name=rule.name if rule else None,
         level=record.level,
         level_label=_level_label(record.level),
-        status="handled" if is_resolved else "open",
-        status_label="已处理" if is_resolved else "未处理",
+        status=status_value,
+        status_label=status_label,
         title=record.title,
         message=record.message,
         warning_message=warning_message,
@@ -366,8 +492,8 @@ def _build_warning_read(
         progress_deviation=item.progress_deviation if item else None,
         is_resolved=is_resolved,
         created_at=record.created_at,
-        handled_at=None,
-        remark=None,
+        handled_at=record.handled_at,
+        remark=record.remark,
         rectification_item_id=getattr(record, "_rectification_item_id", None),
         has_rectification=bool(getattr(record, "_rectification_item_id", None)),
     )
