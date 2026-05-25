@@ -185,6 +185,14 @@
                 <el-button v-else-if="selectedBuildingName" size="small" :disabled="loading" @click="applyBuildingFilter(selectedBuildingName)">筛选此楼栋</el-button>
               </div>
             </div>
+            <div v-if="options.construction_units?.length" class="construction-unit-bar">
+              <span class="construction-unit-label">施工单位</span>
+              <el-radio-group v-model="constructionUnitSegment" size="small" :disabled="loading">
+                <el-radio-button label="__ALL__">全部</el-radio-button>
+                <el-radio-button v-for="unit in options.construction_units" :key="unit" :label="unit">{{ unit }}</el-radio-button>
+              </el-radio-group>
+              <el-tag v-if="filters.constructionUnit" type="warning" effect="light" size="small">当前仅看：{{ filters.constructionUnit }}</el-tag>
+            </div>
             <div v-if="!buildingElevation.length" class="empty-elevation">
               当前筛选范围暂无楼栋楼层数据，请检查楼栋、楼层字段或调整筛选条件。
             </div>
@@ -437,6 +445,15 @@ const unitList = computed(() => {
 })
 const mainTitle = computed(() => ({ overview: '总体视图', discipline: '专业视图', building: '楼栋视图' }[viewMode.value]))
 const visibleBuildingElevation = computed(() => (filters.building ? buildingElevation.value.filter((row) => row.building === filters.building) : buildingElevation.value))
+const constructionUnitSegment = computed<string>({
+  get: () => filters.constructionUnit || '__ALL__',
+  set: (value: string) => {
+    const next = value === '__ALL__' ? '' : value
+    if (next === filters.constructionUnit) return
+    filters.constructionUnit = next
+    loadDashboard()
+  },
+})
 const maxVisibleFloorCount = computed(() => visibleBuildingElevation.value.reduce((max, row) => Math.max(max, row.floors.length), 0))
 const isCompactElevation = computed(() => maxVisibleFloorCount.value > 8)
 const elevationContainerMaxHeight = computed(() => `${Math.max(420, Math.min(640, Math.round((typeof window === 'undefined' ? 560 : window.innerHeight) - 290)))}px`)
@@ -1259,6 +1276,25 @@ function diagnosticRate(key: string) {
   justify-content: flex-end;
   gap: 8px;
   flex-wrap: wrap;
+}
+
+.construction-unit-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 10px 14px;
+  margin-top: 8px;
+  border-radius: 12px;
+  background: rgba(241, 245, 249, 0.6);
+  border: 1px solid rgba(203, 213, 225, 0.4);
+}
+
+.construction-unit-label {
+  color: #475569;
+  font-size: 13px;
+  font-weight: 500;
+  flex-shrink: 0;
 }
 
 .elevation-legend {
