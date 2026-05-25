@@ -690,10 +690,15 @@ function handleSheetChange() {
 
 function handleRowSettingChange() {
   clearParsedSheetState()
-  if (batch.value && parseForm.sheet_name) {
+  if (!batch.value || !parseForm.sheet_name) return
+  if (rowSettingDebounceTimer) clearTimeout(rowSettingDebounceTimer)
+  rowSettingDebounceTimer = setTimeout(() => {
+    rowSettingDebounceTimer = null
     void parseFile()
-  }
+  }, 400)
 }
+
+let rowSettingDebounceTimer: ReturnType<typeof setTimeout> | null = null
 
 function clearParsedSheetState() {
   columns.value = []
@@ -708,9 +713,9 @@ async function uploadFile() {
   if (!selectedFile.value) return
   uploading.value = true
   errorMessage.value = ''
-    columns.value = []
-    previewRows.value = []
-    headerRecommendation.value = null
+  columns.value = []
+  previewRows.value = []
+  headerRecommendation.value = null
   try {
     const response = await uploadImportFile(projectId, selectedFile.value, parseForm.data_date)
     batch.value = response.batch

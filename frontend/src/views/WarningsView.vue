@@ -88,7 +88,19 @@
         <el-button type="primary" :loading="running" :disabled="running || !selectedBatchId" @click="runCurrentWarnings">运行预警</el-button>
         <el-button @click="router.push(`/projects/${projectId}/dashboard`)">返回 Dashboard</el-button>
       </el-empty>
-      <el-table v-else v-loading="loading" :data="pagedRecords" height="560" empty-text="当前没有预警记录，说明当前筛选范围内暂无明显进度风险。" @row-click="openDetail">
+      <template v-else>
+        <div class="batch-panel">
+          <span>已选 {{ selectedRows.length }} 项</span>
+          <el-button :disabled="!batchCreatableRows.length || batchCreating" :loading="batchCreating" type="primary" @click="batchCreateRectifications">
+            批量生成整改项（{{ batchCreatableRows.length }}）
+          </el-button>
+          <el-button :disabled="!selectedRows.length" @click="clearSelection">清除选择</el-button>
+          <span v-if="selectedRows.length && batchCreatableRows.length < selectedRows.length" class="hint">
+            {{ selectedRows.length - batchCreatableRows.length }} 项已存在整改项，将跳过
+          </span>
+        </div>
+        <el-table ref="recordsTableRef" v-loading="loading" :data="pagedRecords" height="560" empty-text="当前没有预警记录，说明当前筛选范围内暂无明显进度风险。" @row-click="openDetail" @selection-change="selectedRows = $event">
+        <el-table-column type="selection" width="42" :selectable="(row: WarningRecord) => !row.has_rectification" />
         <el-table-column label="级别" width="110">
           <template #default="{ row }">
             <el-tag :type="row.level_label === '严重预警' ? 'danger' : row.level_label === '提示' ? 'info' : 'warning'">
@@ -135,6 +147,7 @@
         :total="records.length"
         :page-sizes="[20, 50, 100]"
       />
+      </template>
     </section>
 
     <el-dialog v-model="detailVisible" title="预警详情" width="720px">
@@ -192,6 +205,9 @@ const pageSize = ref(20)
 const errorMessage = ref('')
 const detailVisible = ref(false)
 const selectedRecord = ref<WarningRecord | null>(null)
+const selectedRows = ref<WarningRecord[]>([])
+const batchCreating = ref(false)
+const recordsTableRef = ref<{ clearSelection: () => void } | null>(null)
 const filters = reactive<WarningFilters>({
   discipline: '',
   building: '',
@@ -210,6 +226,7 @@ const filteredFloorOptions = computed(() => {
   return filterOptions.value.floors
 })
 const pagedRecords = computed(() => records.value.slice((page.value - 1) * pageSize.value, page.value * pageSize.value))
+const batchCreatableRows = computed(() => selectedRows.value.filter((row) => !row.has_rectification))
 
 function batchLabel(batch: AnalyticsTrendPoint) {
   const date = batch.data_date || batch.published_at?.slice(0, 10) || `批次 ${batch.batch_id}`
@@ -321,6 +338,36 @@ async function createFromWarning(record: WarningRecord) {
   }
 }
 
+async function batchCreateRectifications() {
+  const targets = batchCreatableRows.value
+  if (!targets.length) return
+  batchCreating.value = true
+  errorMessage.value = ''
+  try {
+    const results = await Promise.allSettled(targets.map((row) => createRectificationFromWarning(projectId, row.id)))
+    const ok = results.filter((r) => r.status === 'fulfilled').length
+    const fail = results.length - ok
+    if (ok && !fail) {
+      ElMessage.success(`已批量生成 ${ok} 条整改项`)
+    } else if (ok && fail) {
+      ElMessage.warning(`成功 ${ok} 条，失败 ${fail} 条`)
+    } else {
+      ElMessage.error('批量生成整改项失败')
+    }
+    clearSelection()
+    await loadRecords()
+  } catch (error) {
+    errorMessage.value = error instanceof Error ? error.message : '批量生成整改项失败'
+  } finally {
+    batchCreating.value = false
+  }
+}
+
+function clearSelection() {
+  recordsTableRef.value?.clearSelection()
+  selectedRows.value = []
+}
+
 function levelLabel(level?: string | null) {
   const value = (level || '').toLowerCase()
   if (['serious', 'critical', 'high'].includes(value)) return '严重预警'
@@ -352,6 +399,24 @@ onMounted(loadAll)
 <style scoped>
 .warning-filters {
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+}
+
+.batch-panel {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  margin-bottom: 12px;
+  background: #f8fafc;
+  border-radius: 10px;
+  font-size: 13px;
+  color: #475569;
+}
+
+.batch-panel .hint {
+  color: #94a3b8;
+  font-size: 12px;
+  margin-left: auto;
 }
 
 .warning-detail {

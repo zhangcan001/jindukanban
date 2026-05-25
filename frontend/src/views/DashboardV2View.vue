@@ -451,9 +451,36 @@ const constructionUnitSegment = computed<string>({
     const next = value === '__ALL__' ? '' : value
     if (next === filters.constructionUnit) return
     filters.constructionUnit = next
-    loadDashboard()
   },
 })
+
+let filtersDebounceTimer: ReturnType<typeof setTimeout> | null = null
+let skipNextFilterWatch = false
+watch(
+  () => [
+    filters.dataDate,
+    filters.calculationMethod,
+    filters.discipline,
+    filters.building,
+    filters.floor,
+    filters.batchId,
+    filters.baselinePlanId,
+    filters.status,
+    filters.systemName,
+    filters.constructionUnit,
+  ],
+  () => {
+    if (skipNextFilterWatch) {
+      skipNextFilterWatch = false
+      return
+    }
+    if (filtersDebounceTimer) clearTimeout(filtersDebounceTimer)
+    filtersDebounceTimer = setTimeout(() => {
+      filtersDebounceTimer = null
+      loadDashboard()
+    }, 250)
+  },
+)
 const maxVisibleFloorCount = computed(() => visibleBuildingElevation.value.reduce((max, row) => Math.max(max, row.floors.length), 0))
 const isCompactElevation = computed(() => maxVisibleFloorCount.value > 8)
 const elevationContainerMaxHeight = computed(() => `${Math.max(420, Math.min(640, Math.round((typeof window === 'undefined' ? 560 : window.innerHeight) - 290)))}px`)
@@ -619,6 +646,7 @@ function buildRouteQuery() {
 }
 
 function resetFilters() {
+  skipNextFilterWatch = true
   filters.discipline = ''
   filters.building = ''
   filters.floor = ''
@@ -631,6 +659,7 @@ function resetFilters() {
 }
 
 function selectDiscipline(name: string) {
+  skipNextFilterWatch = true
   if (filters.floor) {
     filters.floor = ''
     ElMessage.info('已切换专业，楼层筛选已清除。')
@@ -646,6 +675,7 @@ function selectBuilding(name: string) {
 }
 
 function applyBuildingFilter(name: string) {
+  skipNextFilterWatch = true
   filters.building = name
   filters.floor = ''
   selectedBuilding.value = name
@@ -654,6 +684,7 @@ function applyBuildingFilter(name: string) {
 }
 
 function clearBuildingFilter() {
+  skipNextFilterWatch = true
   filters.building = ''
   filters.floor = ''
   viewMode.value = 'building'
@@ -661,6 +692,7 @@ function clearBuildingFilter() {
 }
 
 function applyFloorFilter(building?: string | null, floor?: string | null) {
+  skipNextFilterWatch = true
   if (building) {
     filters.building = building
     selectedBuilding.value = building
@@ -677,6 +709,7 @@ function applySelectedFloorFilter() {
 }
 
 function clearFloorFilter() {
+  skipNextFilterWatch = true
   filters.floor = ''
   loadDashboard()
 }
