@@ -424,6 +424,10 @@ class DashboardUnifiedMatrixRow(BaseModel):
     planned_percent: float | None = None
     progress_deviation: float | None = None
     delayed_count: int = 0
+    serious_delayed_count: int = 0
+    not_started_count: int = 0
+    status: str = "no_data"
+    status_label: str = "无数据"
     calculation_method: str | None = None
 
 

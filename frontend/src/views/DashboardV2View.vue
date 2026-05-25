@@ -262,11 +262,13 @@
                 v-for="cell in floorHeatmap"
                 :key="`${cell.building}-${cell.floor}`"
                 type="button"
-                :class="['floor-cell', delayClass(cell.progress_deviation)]"
+                :class="['floor-cell', statusClass(cell.status)]"
+                :title="floorCellTitle(cell)"
                 @click="applyFloorFilter(cell.building, cell.floor)"
               >
                 <strong>{{ cell.building }} {{ cell.floor }}</strong>
                 <span>{{ fmtPercent(cell.actual_percent) }}</span>
+                <small>{{ floorCellStatusText(cell) }}</small>
               </button>
             </div>
           </div>
@@ -852,6 +854,30 @@ function floorTooltip(building: string, floor: DashboardBuildingElevationFloor) 
   ].join(' | ')
 }
 
+function floorCellTitle(cell: DashboardUnifiedMatrixRow) {
+  return [
+    `楼栋：${cell.building || '-'}`,
+    `楼层：${cell.floor || '-'}`,
+    `任务数：${cell.task_count}`,
+    `当前实际进度：${fmtPercent(cell.actual_percent)}`,
+    `按计划应完成进度：${fmtPercent(cell.planned_percent)}`,
+    `偏差：${signedPercent(cell.progress_deviation)}`,
+    `状态：${cell.status_label || statusLabel(cell.progress_deviation)}`,
+    `严重滞后数：${cell.serious_delayed_count ?? 0}`,
+    `滞后任务数：${cell.delayed_count}`,
+    `未到计划开始数：${cell.not_started_count ?? 0}`,
+  ].join(' | ')
+}
+
+function floorCellStatusText(cell: DashboardUnifiedMatrixRow) {
+  const status = cell.status_label || statusLabel(cell.progress_deviation)
+  const serious = cell.serious_delayed_count ?? 0
+  const delayed = cell.delayed_count ?? 0
+  if (serious > 0) return `${status} · 严重 ${serious}`
+  if (delayed > 0) return `${status} · 滞后 ${delayed}`
+  return status
+}
+
 function delayPercent(count: number) {
   const total = delayDistribution.value.reduce((sum, row) => sum + row.count, 0)
   return total ? (count / total) * 100 : 0
@@ -1175,6 +1201,14 @@ function diagnosticRate(key: string) {
 .floor-cell span {
   display: block;
   margin-top: 8px;
+}
+
+.floor-cell small {
+  display: block;
+  margin-top: 6px;
+  color: currentColor;
+  font-size: 12px;
+  opacity: 0.82;
 }
 
 .is-green {

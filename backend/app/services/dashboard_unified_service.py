@@ -357,6 +357,18 @@ def _matrix_rows(items: list[ProgressItem], dimensions: tuple[str, str], profile
     for (first, second), group in groups.items():
         actual, _, _ = aggregate_progress(group, profile, "actual_percent", algorithm)
         planned, _, _ = aggregate_progress(group, profile, "planned_percent", algorithm)
+        deviation = round(actual - planned, 4) if actual is not None and planned is not None else None
+        status_counter = Counter(_delay_status(item, reference_date) for item in group)
+        serious_delayed_count = status_counter["seriously_delayed"]
+        delayed_count_value = status_counter["delayed"]
+        not_started_count = status_counter["not_started_by_plan"]
+        status, status_label = _floor_status(
+            serious_delayed_count=serious_delayed_count,
+            delayed_count=delayed_count_value,
+            not_started_count=not_started_count,
+            task_count=len(group),
+            deviation=deviation,
+        )
         rows.append(
             DashboardUnifiedMatrixRow(
                 building=first if dimensions[0] == "building" else None,
@@ -365,8 +377,12 @@ def _matrix_rows(items: list[ProgressItem], dimensions: tuple[str, str], profile
                 task_count=len(group),
                 actual_percent=actual,
                 planned_percent=planned,
-                progress_deviation=round(actual - planned, 4) if actual is not None and planned is not None else None,
+                progress_deviation=deviation,
                 delayed_count=delayed_count(group, reference_date),
+                serious_delayed_count=serious_delayed_count,
+                not_started_count=not_started_count,
+                status=status,
+                status_label=status_label,
                 calculation_method=algorithm,
             )
         )
@@ -481,10 +497,6 @@ def _floor_status(
 ) -> tuple[str, str]:
     if task_count <= 0:
         return "no_data", "无数据"
-    if serious_delayed_count > 0:
-        return "seriously_delayed", "严重滞后"
-    if delayed_count > 0:
-        return "delayed", "明显滞后"
     if not_started_count == task_count:
         return "not_started_by_plan", "未到计划开始"
     if deviation is None:

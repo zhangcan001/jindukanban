@@ -302,6 +302,70 @@ def test_dashboard_v2_building_elevation_status_and_floor_sorting() -> None:
     assert by_floor["2层"]["status"] == "normal"
 
 
+def test_dashboard_v2_floor_status_uses_aggregate_deviation_not_single_task_worst_case() -> None:
+    db = SessionLocal()
+    try:
+        project = Project(name="T050 heatmap status consistency")
+        db.add(project)
+        db.flush()
+        batch = ImportBatch(
+            project_id=project.id,
+            file_name="t050.xlsx",
+            sheet_name="机电",
+            status="published",
+            data_date=date(2026, 5, 18),
+        )
+        db.add(batch)
+        db.flush()
+        db.add_all(
+            [
+                ProgressItem(
+                    project_id=project.id,
+                    batch_id=batch.id,
+                    task_id=1001,
+                    task_name="B2 2层 严重滞后项",
+                    building="B2",
+                    floor="2层",
+                    discipline="机电",
+                    actual_percent=40,
+                    planned_percent=70,
+                    progress_deviation=-30,
+                    planned_start_date=date(2026, 5, 1),
+                    planned_finish_date=date(2026, 5, 18),
+                ),
+                ProgressItem(
+                    project_id=project.id,
+                    batch_id=batch.id,
+                    task_id=1002,
+                    task_name="B2 2层 超前项",
+                    building="B2",
+                    floor="2层",
+                    discipline="消防",
+                    actual_percent=100,
+                    planned_percent=50,
+                    progress_deviation=50,
+                ),
+            ]
+        )
+        db.commit()
+        project_id = project.id
+        batch_id = batch.id
+    finally:
+        db.close()
+
+    with TestClient(app) as client:
+        response = client.get(f"/api/projects/{project_id}/dashboard-v2", params={"view_mode": "building", "batch_id": batch_id})
+
+    payload = response.json()
+    assert response.status_code == 200
+    heatmap_cell = next(row for row in payload["floor_heatmap"] if row["building"] == "B2" and row["floor"] == "2层")
+    elevation_floor = next(row for row in payload["building_elevation"][0]["floors"] if row["floor"] == "2层")
+    assert heatmap_cell["progress_deviation"] == -5
+    assert heatmap_cell["status"] == elevation_floor["status"] == "normal"
+    assert heatmap_cell["status_label"] == elevation_floor["status_label"] == "正常"
+    assert heatmap_cell["serious_delayed_count"] == elevation_floor["serious_delayed_count"] == 1
+
+
 def test_progress_items_project_scope_import_group_returns_all_batches() -> None:
     project_id, group_id, batch_ids = _seed_project_scope_progress_items()
     with TestClient(app) as client:

@@ -321,6 +321,10 @@ export type DashboardUnifiedMatrixRow = {
   planned_percent?: number | null
   progress_deviation?: number | null
   delayed_count: number
+  serious_delayed_count?: number
+  not_started_count?: number
+  status?: string | null
+  status_label?: string | null
   calculation_method?: string | null
 }
 
