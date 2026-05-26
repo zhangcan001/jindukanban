@@ -9,7 +9,7 @@ from fastapi.staticfiles import StaticFiles
 from app.config import get_settings
 from app.database import SessionLocal, check_database, init_db
 from app.observability import RequestIdMiddleware, configure_logging
-from app.routers import ai, analytics, baseline_plans, calculation_profiles, dashboard_v2, imports, maintenance, progress_items, projects, rectifications, reports, templates, warnings
+from app.routers import ai, analytics, baseline_plans, calculation_profiles, dashboard_v2, diagnostic, imports, maintenance, progress_items, projects, rectifications, reports, templates, warnings
 from app.services.ai_service import ensure_builtin_prompt_templates
 from app.services.project_template_service import ensure_builtin_project_templates
 
@@ -71,6 +71,7 @@ app.include_router(rectifications.router, prefix=settings.api_prefix)
 app.include_router(reports.router, prefix=settings.api_prefix)
 app.include_router(maintenance.router, prefix=settings.api_prefix)
 app.include_router(templates.router, prefix=settings.api_prefix)
+app.include_router(diagnostic.router, prefix=settings.api_prefix)
 
 
 @app.get(f"{settings.api_prefix}/health")

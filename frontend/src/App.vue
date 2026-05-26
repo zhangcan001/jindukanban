@@ -67,6 +67,10 @@
           <el-icon><Tools /></el-icon>
           <span>系统维护</span>
         </el-menu-item>
+        <el-menu-item index="/diagnostic">
+          <el-icon><Warning /></el-icon>
+          <span>问题诊断</span>
+        </el-menu-item>
         <el-menu-item index="/help">
           <el-icon><QuestionFilled /></el-icon>
           <span>帮助中心</span>
@@ -108,6 +112,7 @@ import {
   Tickets,
   Tools,
   Upload,
+  Warning,
   WarnTriangleFilled,
 } from '@element-plus/icons-vue'
 
@@ -144,6 +149,7 @@ const activeMenu = computed(() => {
   if (path.includes('/reports/history')) return projectPath('report-history')
   if (path.includes('/reports')) return projectPath('reports')
   if (path.startsWith('/maintenance')) return '/maintenance'
+  if (path.startsWith('/diagnostic')) return '/diagnostic'
   if (path.startsWith('/help')) return '/help'
   if (path.startsWith('/getting-started')) return '/getting-started'
   if (path.startsWith('/about')) return '/about'

@@ -15,8 +15,10 @@ from __future__ import annotations
 import json
 import logging
 import sys
+import threading
 import time
 import uuid
+from collections import deque
 from contextvars import ContextVar
 from typing import Any
 
@@ -27,6 +29,13 @@ from starlette.responses import Response
 
 REQUEST_ID_HEADER = "X-Request-ID"
 _request_id_var: ContextVar[str | None] = ContextVar("request_id", default=None)
+
+# 进程内 ring buffer——保留最近 N 条 WARNING+ 日志,供 /api/diagnostic/recent-errors 查询。
+# 设计取舍:不写文件、不发外部 sink,只保留在内存里,避免给单机部署增加运维负担;
+# 进程重启即清空,符合"现场临时排错"场景。
+_LOG_BUFFER_CAPACITY = 200
+_log_buffer: deque[dict[str, Any]] = deque(maxlen=_LOG_BUFFER_CAPACITY)
+_log_buffer_lock = threading.Lock()
 
 
 def current_request_id() -> str | None:
@@ -90,6 +99,56 @@ class JsonLineFormatter(logging.Formatter):
         return json.dumps(payload, ensure_ascii=False, default=str)
 
 
+class RingBufferHandler(logging.Handler):
+    """WARNING+ 日志同步写入 ``_log_buffer``,供诊断面板查询。"""
+
+    def emit(self, record: logging.LogRecord) -> None:
+        try:
+            payload: dict[str, Any] = {
+                "ts": time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(record.created)),
+                "level": record.levelname,
+                "logger": record.name,
+                "message": record.getMessage(),
+            }
+            rid = current_request_id()
+            if rid:
+                payload["request_id"] = rid
+            for key, value in record.__dict__.items():
+                if key in JsonLineFormatter._RESERVED_RECORD_KEYS or key.startswith("_"):
+                    continue
+                # extra={...} 里的字段做个浅 stringify,避免存放 ORM 对象引用导致内存泄漏
+                try:
+                    json.dumps(value, default=str)
+                    payload[key] = value
+                except (TypeError, ValueError):
+                    payload[key] = str(value)
+            if record.exc_info:
+                payload["exc_info"] = logging.Formatter().formatException(record.exc_info)
+            with _log_buffer_lock:
+                _log_buffer.append(payload)
+        except Exception:  # noqa: BLE001 — 日志路径不允许抛
+            pass
+
+
+def recent_log_entries(min_level: str = "WARNING", limit: int = 50) -> list[dict[str, Any]]:
+    """返回 ring buffer 里的最近日志,新→旧 顺序。"""
+    threshold = logging.getLevelName(min_level.upper())
+    if not isinstance(threshold, int):
+        threshold = logging.WARNING
+    with _log_buffer_lock:
+        snapshot = list(_log_buffer)
+    filtered = [entry for entry in snapshot if logging.getLevelName(entry.get("level", "INFO")) >= threshold]
+    return list(reversed(filtered[-limit:]))
+
+
+def clear_log_buffer() -> int:
+    """清空 ring buffer,返回清空前的条数(给诊断面板用)。"""
+    with _log_buffer_lock:
+        count = len(_log_buffer)
+        _log_buffer.clear()
+    return count
+
+
 def configure_logging(level: str = "INFO", fmt: str = "json") -> None:
     """启动时调用一次——替换 root logger 的 handler。
 
@@ -107,3 +166,7 @@ def configure_logging(level: str = "INFO", fmt: str = "json") -> None:
     else:
         handler.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s"))
     root.addHandler(handler)
+
+    # ring buffer 永远收 WARNING+,跟主 handler 的级别独立(主 handler 受 LOG_LEVEL 控制)
+    ring = RingBufferHandler(level=logging.WARNING)
+    root.addHandler(ring)

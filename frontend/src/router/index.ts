@@ -26,6 +26,11 @@ const router = createRouter({
       component: () => import('../views/LocalMaintenance.vue'),
     },
     {
+      path: '/diagnostic',
+      name: 'diagnostic',
+      component: () => import('../views/DiagnosticView.vue'),
+    },
+    {
       path: '/about',
       name: 'about',
       component: () => import('../views/AboutView.vue'),
