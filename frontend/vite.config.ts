@@ -18,6 +18,9 @@ export default defineConfig({
   ],
   server: {
     port: 5173,
+    // 端口被占用时让 vite 自动跳到下一个;启动脚本会另起一层 pick_port 兜底,
+    // 这里显式声明意图,避免有人误改成 true 后导致用户启动失败
+    strictPort: false,
   },
   build: {
     chunkSizeWarningLimit: 1200,

@@ -197,6 +197,7 @@ $frontendUrl = "http://127.0.0.1:$frontendPort"
 
 if (Test-UrlReady -Url "$frontendUrl/" -AllowClientError) {
   Write-Host "前端已运行，跳过启动。"
+  & (Join-Path $PSScriptRoot "write_runtime_state.ps1") -RuntimeDir $runtimeDir -BackendPort $backendPort -FrontendPort $frontendPort -PrimaryUrl "$frontendUrl/" -Mode "source"
   Start-Process $frontendUrl
   exit 0
 }
@@ -209,6 +210,7 @@ if ($frontendPortStatus -eq "project") {
     exit 1
   }
   Write-Host "前端已运行，跳过启动。"
+  & (Join-Path $PSScriptRoot "write_runtime_state.ps1") -RuntimeDir $runtimeDir -BackendPort $backendPort -FrontendPort $frontendPort -PrimaryUrl "$frontendUrl/" -Mode "source"
   Start-Process $frontendUrl
   exit 0
 }
@@ -234,5 +236,6 @@ Write-ListeningPid -Port $frontendPort -PidFile (Join-Path $runtimeDir "frontend
 
 Write-Host "系统已启动。"
 Write-Host "访问地址：$frontendUrl"
+& (Join-Path $PSScriptRoot "write_runtime_state.ps1") -RuntimeDir $runtimeDir -BackendPort $backendPort -FrontendPort $frontendPort -PrimaryUrl "$frontendUrl/" -Mode "source"
 Start-Process $frontendUrl
 exit 0

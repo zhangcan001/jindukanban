@@ -72,8 +72,27 @@ function Stop-ProjectPort {
 
 Stop-RecordedPid -PidFile (Join-Path $runtimeDir "backend.pid") -ServiceName "backend"
 Stop-RecordedPid -PidFile (Join-Path $runtimeDir "frontend.pid") -ServiceName "frontend"
-Stop-ProjectPort -Port 8000 -ServiceName "backend"
-Stop-ProjectPort -Port 5173 -ServiceName "frontend"
+
+# 优先读 ports.json,拿到真实占用端口(自动切换后可能不是 8000/5173);读不到则回退默认。
+$backendPort = 8000
+$frontendPort = 5173
+$portsFile = Join-Path $runtimeDir "ports.json"
+if (Test-Path -LiteralPath $portsFile) {
+  try {
+    $state = Get-Content -LiteralPath $portsFile -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+    if ($state.backend_port) { $backendPort = [int]$state.backend_port }
+    if ($state.frontend_port) { $frontendPort = [int]$state.frontend_port }
+    Write-Host "已从 ports.json 读取端口：backend=$backendPort, frontend=$frontendPort"
+  } catch {
+    Write-Host "[警告] ports.json 解析失败,回退到默认端口 8000/5173。"
+  }
+}
+Stop-ProjectPort -Port $backendPort -ServiceName "backend"
+Stop-ProjectPort -Port $frontendPort -ServiceName "frontend"
+
+# 清理运行时状态文件,避免下次 stop 误用过期端口
+Remove-Item -LiteralPath (Join-Path $runtimeDir "ports.json") -Force -ErrorAction SilentlyContinue
+Remove-Item -LiteralPath (Join-Path $runtimeDir "last_url.txt") -Force -ErrorAction SilentlyContinue
 
 if (-not $detected) {
   Write-Host "当前未检测到本项目服务。"

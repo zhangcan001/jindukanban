@@ -160,12 +160,13 @@ if "%FRONTEND_MODE%"=="backend-static" (
 
 echo 系统已启动
 if "%FRONTEND_MODE%"=="backend-static" (
-  echo 访问地址：%BACKEND_URL%/
-  start "" "%BACKEND_URL%/"
+  set "PRIMARY_URL=%BACKEND_URL%/"
 ) else (
-  echo 访问地址：%FRONTEND_URL%
-  start "" "%FRONTEND_URL%"
+  set "PRIMARY_URL=%FRONTEND_URL%/"
 )
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0write_runtime_state.ps1" -RuntimeDir "%RUNTIME_DIR%" -BackendPort %BACKEND_PORT% -FrontendPort %FRONTEND_PORT% -PrimaryUrl "%PRIMARY_URL%" -Mode "%FRONTEND_MODE%" >nul 2>nul
+echo 访问地址：%PRIMARY_URL%
+start "" "%PRIMARY_URL%"
 exit /b 0
 
 :desktop_shell_start
@@ -223,6 +224,7 @@ if "%URL_READY%"=="0" (
 )
 
 echo System started: %BACKEND_URL%/
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0write_runtime_state.ps1" -RuntimeDir "%RUNTIME_DIR%" -BackendPort %BACKEND_PORT% -PrimaryUrl "%BACKEND_URL%/" -Mode "desktop-shell" >nul 2>nul
 exit /b 0
 
 :check_port
@@ -240,15 +242,20 @@ set "PICK_START=%~1"
 set "PICK_NAME=%~2"
 set "PICK_VAR=%~3"
 set "PICK_RESULT="
-for /f "delims=" %%P in ('powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0pick_port.ps1" -StartPort %PICK_START% -Name "%PICK_NAME%" 2^>nul') do (
+rem stderr 不再被吞——pick_port.ps1 的"已切换到 X"提示会直接打印给用户
+for /f "delims=" %%P in ('powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0pick_port.ps1" -StartPort %PICK_START% -Name "%PICK_NAME%"') do (
   set "PICK_RESULT=%%P"
 )
 if not defined PICK_RESULT (
-  powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0pick_port.ps1" -StartPort %PICK_START% -Name "%PICK_NAME%"
+  echo [错误] %PICK_NAME%端口选择失败,请检查上方 [错误] 提示。
   exit /b 1
 )
 set "%PICK_VAR%=%PICK_RESULT%"
-echo %PICK_NAME% port %PICK_RESULT% selected
+if not "%PICK_RESULT%"=="%PICK_START%" (
+  echo [提示] %PICK_NAME%端口已从 %PICK_START% 自动切换到 %PICK_RESULT%
+) else (
+  echo %PICK_NAME% port %PICK_RESULT% selected
+)
 exit /b 0
 
 :wait_url
