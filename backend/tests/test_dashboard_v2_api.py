@@ -150,6 +150,7 @@ def _seed_project_scope_progress_items() -> tuple[int, str, list[int]]:
                     actual_percent=50,
                     planned_percent=60,
                     progress_deviation=-10,
+                    weight=1,
                 )
                 db.add(item)
                 db.flush()
@@ -279,6 +280,34 @@ def test_dashboard_v2_response_includes_adaptation_diagnostics() -> None:
     assert payload["calculation_diagnostics"]["recommended_calculation_method"] == "weighted_percent"
     assert payload["dashboard_capabilities"]["building_view"]["available"] is True
     assert payload["dashboard_capabilities"]["floor_heatmap"]["available"] is True
+
+
+def test_dashboard_v2_project_scope_diagnostics_use_aggregated_items() -> None:
+    project_id, group_id, _ = _seed_project_scope_progress_items()
+    with TestClient(app) as client:
+        response = client.get(
+            f"/api/projects/{project_id}/dashboard-v2",
+            params={"import_group_id": group_id},
+        )
+
+    payload = response.json()
+    assert response.status_code == 200
+    assert payload["overview"]["batch_id"] is None
+    assert payload["floor_heatmap"]
+    assert payload["calculation_context"]["calculation_method"] == "weighted_percent"
+    assert payload["calculation_diagnostics"]["recommended_calculation_method"] == "weighted_percent"
+    assert payload["calculation_diagnostics"]["recommended_calculation_method_name"] == "权重统计"
+    assert payload["calculation_diagnostics"]["recommended_reason"] == "检测到 Excel 中存在权重字段"
+    methods = payload["calculation_diagnostics"]["available_calculation_methods"]
+    weighted = next(method for method in methods if method["code"] == "weighted_percent")
+    task_average = next(method for method in methods if method["code"] == "task_average")
+    assert weighted["available"] is True
+    assert weighted["recommended"] is True
+    assert task_average["recommended"] is False
+    assert payload["dashboard_capabilities"]["discipline_view"]["available"] is True
+    assert payload["dashboard_capabilities"]["building_view"]["available"] is True
+    assert payload["dashboard_capabilities"]["floor_heatmap"]["available"] is True
+    assert payload["dashboard_capabilities"]["percent_average"]["available"] is True
 
 
 def test_dashboard_v2_building_elevation_status_and_floor_sorting() -> None:

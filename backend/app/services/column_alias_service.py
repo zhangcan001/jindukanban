@@ -24,6 +24,8 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models.column_alias_history import ColumnAliasHistory
+from app.services.field_detector import default_field_type, normalize_column_name
+from app.services.field_diagnostics_service import explain_mapping
 
 
 FUZZY_MIN_RATIO = 0.75  # 低于此分数视为不匹配；中文短串 SequenceMatcher 在 0.7~0.8 区间最常见
@@ -38,7 +40,7 @@ def normalize_header(value: str) -> str:
 
     if not value:
         return ""
-    return _PUNCT_PATTERN.sub("", str(value).strip().lower())
+    return _PUNCT_PATTERN.sub("", normalize_column_name(str(value)))
 
 
 @dataclass
@@ -194,7 +196,8 @@ def enrich_columns_with_aliases(
     """为列名识别结果补充别名历史结果。
 
     输入 columns 是 excel_parser.parse_preview 的输出。
-    对 recommended_field 为 None 的列，尝试 lookup_alias，命中则填充：
+    对 recommended_field 为 None 的列，尝试 lookup_alias，命中则填充；
+    对已有规则推荐的列，若历史精确命中与规则冲突，则认为用户之前的人工修正优先。
     - recommended_field
     - field_type（若未识别）
     - alias_source / alias_confidence（新增字段，前端可用于显示"AI 建议"图标）
@@ -209,25 +212,55 @@ def enrich_columns_with_aliases(
 
     enriched: list[dict] = []
     for column in columns:
+        column_name = str(column.get("name") or "")
         if column.get("recommended_field"):
+            match = lookup_alias(db, project_id=project_id, raw_header=column_name)
+            if match is not None and match.source == "history-exact" and match.system_field != column.get("recommended_field"):
+                original_field = column.get("recommended_field")
+                _apply_alias_match(column, match)
+                column["match_type"] = "历史纠错匹配"
+                column["confidence"] = "高"
+                column["reason"] = f"历史导入中用户曾将该列从 {original_field} 修正为 {match.system_field}，本次按历史修正优先。"
+                column["needs_review"] = True
+                enriched.append(column)
+                continue
             column.setdefault("alias_source", "rule")
             column.setdefault("alias_confidence", 1.0)
             enriched.append(column)
             continue
-        match = lookup_alias(db, project_id=project_id, raw_header=str(column.get("name") or ""))
+        match = lookup_alias(db, project_id=project_id, raw_header=column_name)
         if match is None:
             column.setdefault("alias_source", None)
             column.setdefault("alias_confidence", None)
             enriched.append(column)
             continue
-        column["recommended_field"] = match.system_field
-        if match.field_type and column.get("field_type") in (None, "unknown"):
-            column["field_type"] = match.field_type
-        column["alias_source"] = match.source
-        column["alias_confidence"] = match.confidence
-        column["save_to_extra"] = False
-        field_type = column.get("field_type") or "unknown"
-        column["is_dimension"] = field_type == "text"
-        column["is_metric"] = field_type in {"number", "percent", "currency"}
+        _apply_alias_match(column, match)
+        if match.source == "history-fuzzy":
+            column["needs_review"] = True
+            column["confidence"] = "中"
+        else:
+            column["needs_review"] = bool(column.get("needs_review"))
         enriched.append(column)
     return enriched
+
+
+def _apply_alias_match(column: dict, match: AliasMatch) -> None:
+    column["recommended_field"] = match.system_field
+    if match.field_type and column.get("field_type") in (None, "unknown"):
+        column["field_type"] = match.field_type
+    if column.get("field_type") in (None, "unknown"):
+        column["field_type"] = default_field_type(match.system_field)
+    column["alias_source"] = match.source
+    column["alias_confidence"] = match.confidence
+    column["save_to_extra"] = False
+    field_type = column.get("field_type") or "unknown"
+    column["is_dimension"] = field_type == "text"
+    column["is_metric"] = field_type in {"number", "percent", "currency"}
+    explanation = explain_mapping(str(column.get("name") or ""), match.system_field)
+    column["match_type"] = "历史别名匹配"
+    column["confidence"] = "高" if match.source == "history-exact" else "中"
+    column["reason"] = f"根据本项目历史导入记录匹配为 {match.system_field}，相似度 {round(match.confidence * 100)}%。"
+    column["field_role"] = explanation["field_role"]
+    column["is_required"] = explanation["is_required"]
+    column["affects_statistics"] = explanation["affects_statistics"]
+    column["affects_delay"] = explanation["affects_delay"]

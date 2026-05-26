@@ -1,104 +1,107 @@
 <template>
-  <el-container class="layout-shell">
-    <el-aside class="layout-sidebar" width="236px">
-      <div class="brand-block">
-        <span>v5.0-desktop-shell</span>
-        <strong>工程进度</strong>
-      </div>
-      <div class="project-switcher" v-if="projects.length > 0">
-        <el-select
-          :model-value="currentProjectId ?? undefined"
-          placeholder="切换项目"
-          size="small"
-          filterable
-          @change="switchProject"
-        >
-          <el-option
-            v-for="project in projects"
-            :key="project.id"
-            :label="project.name"
-            :value="project.id"
-          />
-        </el-select>
-      </div>
-      <el-menu :default-active="activeMenu" class="side-menu" router>
-        <div class="menu-group-title">项目</div>
-        <el-menu-item index="/">
-          <el-icon><HomeFilled /></el-icon>
-          <span>工作台</span>
-        </el-menu-item>
-        <el-menu-item index="/projects">
-          <el-icon><Folder /></el-icon>
-          <span>项目管理</span>
-        </el-menu-item>
-        <div class="menu-group-title">进度</div>
-        <el-menu-item :index="projectPath('import')" class="menu-primary">
-          <el-icon><Upload /></el-icon>
-          <span>导入 Excel</span>
-        </el-menu-item>
-        <el-menu-item :index="projectPath('dashboard')">
-          <el-icon><DataBoard /></el-icon>
-          <span>进度看板</span>
-        </el-menu-item>
-        <el-menu-item :index="projectPath('progress-items')">
-          <el-icon><List /></el-icon>
-          <span>进度明细</span>
-        </el-menu-item>
-        <div class="menu-group-title">问题闭环</div>
-        <el-menu-item :index="projectPath('warnings')">
-          <el-icon><WarnTriangleFilled /></el-icon>
-          <span>预警记录</span>
-        </el-menu-item>
-        <el-menu-item :index="projectPath('rectifications')">
-          <el-icon><CircleCheck /></el-icon>
-          <span>整改闭环</span>
-        </el-menu-item>
-        <div class="menu-group-title">报表</div>
-        <el-menu-item :index="projectPath('reports')">
-          <el-icon><Download /></el-icon>
-          <span>报表中心</span>
-        </el-menu-item>
-        <el-menu-item :index="projectPath('report-history')">
-          <el-icon><Tickets /></el-icon>
-          <span>报表历史</span>
-        </el-menu-item>
-        <div class="menu-group-title">系统</div>
-        <el-menu-item index="/maintenance">
-          <el-icon><Tools /></el-icon>
-          <span>系统维护</span>
-        </el-menu-item>
-        <el-menu-item index="/diagnostic">
-          <el-icon><Warning /></el-icon>
-          <span>问题诊断</span>
-        </el-menu-item>
-        <el-menu-item index="/help">
-          <el-icon><QuestionFilled /></el-icon>
-          <span>帮助中心</span>
-        </el-menu-item>
-        <el-menu-item index="/getting-started">
-          <el-icon><Guide /></el-icon>
-          <span>新手引导</span>
-        </el-menu-item>
-        <el-menu-item index="/about">
-          <el-icon><InfoFilled /></el-icon>
-          <span>关于</span>
-        </el-menu-item>
-      </el-menu>
-    </el-aside>
+  <el-config-provider :locale="zhCn">
+    <el-container class="layout-shell">
+      <el-aside class="layout-sidebar" width="236px">
+        <div class="brand-block">
+          <span>v5.0-desktop-shell</span>
+          <strong>工程进度</strong>
+        </div>
+        <div class="project-switcher" v-if="projects.length > 0">
+          <el-select
+            :model-value="currentProjectId ?? undefined"
+            placeholder="切换项目"
+            size="small"
+            filterable
+            @change="switchProject"
+          >
+            <el-option
+              v-for="project in projects"
+              :key="project.id"
+              :label="project.name"
+              :value="project.id"
+            />
+          </el-select>
+        </div>
+        <el-menu :default-active="activeMenu" class="side-menu" router>
+          <div class="menu-group-title">项目</div>
+          <el-menu-item index="/">
+            <el-icon><HomeFilled /></el-icon>
+            <span>工作台</span>
+          </el-menu-item>
+          <el-menu-item index="/projects">
+            <el-icon><Folder /></el-icon>
+            <span>项目管理</span>
+          </el-menu-item>
+          <div class="menu-group-title">进度</div>
+          <el-menu-item :index="projectPath('import')" class="menu-primary">
+            <el-icon><Upload /></el-icon>
+            <span>导入 Excel</span>
+          </el-menu-item>
+          <el-menu-item :index="projectPath('dashboard')">
+            <el-icon><DataBoard /></el-icon>
+            <span>进度看板</span>
+          </el-menu-item>
+          <el-menu-item :index="projectPath('progress-items')">
+            <el-icon><List /></el-icon>
+            <span>进度明细</span>
+          </el-menu-item>
+          <div class="menu-group-title">问题闭环</div>
+          <el-menu-item :index="projectPath('warnings')">
+            <el-icon><WarnTriangleFilled /></el-icon>
+            <span>预警记录</span>
+          </el-menu-item>
+          <el-menu-item :index="projectPath('rectifications')">
+            <el-icon><CircleCheck /></el-icon>
+            <span>整改闭环</span>
+          </el-menu-item>
+          <div class="menu-group-title">报表</div>
+          <el-menu-item :index="projectPath('reports')">
+            <el-icon><Download /></el-icon>
+            <span>报表中心</span>
+          </el-menu-item>
+          <el-menu-item :index="projectPath('report-history')">
+            <el-icon><Tickets /></el-icon>
+            <span>报表历史</span>
+          </el-menu-item>
+          <div class="menu-group-title">系统</div>
+          <el-menu-item index="/maintenance">
+            <el-icon><Tools /></el-icon>
+            <span>系统维护</span>
+          </el-menu-item>
+          <el-menu-item index="/diagnostic">
+            <el-icon><Warning /></el-icon>
+            <span>问题诊断</span>
+          </el-menu-item>
+          <el-menu-item index="/help">
+            <el-icon><QuestionFilled /></el-icon>
+            <span>帮助中心</span>
+          </el-menu-item>
+          <el-menu-item index="/getting-started">
+            <el-icon><Guide /></el-icon>
+            <span>新手引导</span>
+          </el-menu-item>
+          <el-menu-item index="/about">
+            <el-icon><InfoFilled /></el-icon>
+            <span>关于</span>
+          </el-menu-item>
+        </el-menu>
+      </el-aside>
 
-    <el-container>
-      <el-main class="layout-main">
-        <ErrorBoundary>
-          <router-view />
-        </ErrorBoundary>
-      </el-main>
+      <el-container>
+        <el-main class="layout-main">
+          <ErrorBoundary>
+            <router-view />
+          </ErrorBoundary>
+        </el-main>
+      </el-container>
     </el-container>
-  </el-container>
+  </el-config-provider>
 </template>
 
 <script setup lang="ts">
 import { computed, onMounted, onBeforeUnmount, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import zhCn from 'element-plus/es/locale/lang/zh-cn'
 import {
   CircleCheck,
   DataBoard,

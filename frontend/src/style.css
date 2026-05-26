@@ -313,6 +313,23 @@ select {
   gap: 4px;
 }
 
+.sample-values {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  max-width: 100%;
+}
+
+.sample-values .el-tag {
+  max-width: 100%;
+}
+
+.sample-values .el-tag__content {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .quality-score,
 .quality-item {
   min-height: 108px;

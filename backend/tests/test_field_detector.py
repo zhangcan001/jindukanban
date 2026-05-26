@@ -48,6 +48,26 @@ def test_field_detector_maps_real_progress_aliases_before_date_fields() -> None:
     assert detect_column("合同量")["recommended_field"] == "total_quantity"
 
 
+def test_field_detector_normalizes_units_and_newlines() -> None:
+    assert detect_column("实际\n完成率（%）")["recommended_field"] == "actual_percent"
+    assert detect_column("计划 完成 比例")["recommended_field"] == "planned_percent"
+
+
+def test_field_detector_uses_sample_values_for_ambiguous_headers() -> None:
+    detected = detect_column("当前情况", ["10%", "20%", "35%"])
+
+    assert detected["recommended_field"] == "actual_percent"
+    assert detected["field_type"] == "percent"
+    assert detected["needs_review"] is False
+
+
+def test_field_detector_marks_ambiguous_sample_inference_for_review() -> None:
+    detected = detect_column("比例", ["0.1", "0.2", "0.35"])
+
+    assert detected["recommended_field"] is None
+    assert detected["field_type"] == "percent"
+
+
 def test_field_detector_does_not_map_responsibility_units_to_quantity_unit() -> None:
     for column in ["建设单位", "监理单位", "班组单位"]:
         detected = detect_column(column)

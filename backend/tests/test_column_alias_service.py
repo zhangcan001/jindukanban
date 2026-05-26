@@ -149,3 +149,27 @@ def test_enrich_columns_fills_unrecognized_columns() -> None:
         assert enriched[1]["is_metric"] is True
         assert enriched[2]["recommended_field"] is None
         assert enriched[2]["alias_source"] is None
+
+
+def test_enrich_columns_prefers_exact_history_correction_over_rule() -> None:
+    with SessionLocal() as db:
+        project = _make_project(db)
+        record_alias(db, project_id=project.id, raw_header="完成率", system_field="reported_percent", field_type="percent")
+        db.commit()
+
+        columns = [
+            {
+                "name": "完成率",
+                "field_type": "percent",
+                "recommended_field": "actual_percent",
+                "is_dimension": False,
+                "is_metric": True,
+                "save_to_extra": False,
+            },
+        ]
+        enriched = enrich_columns_with_aliases(db, project_id=project.id, columns=columns)
+
+        assert enriched[0]["recommended_field"] == "reported_percent"
+        assert enriched[0]["alias_source"] == "history-exact"
+        assert enriched[0]["needs_review"] is True
+        assert enriched[0]["match_type"] == "历史纠错匹配"

@@ -76,6 +76,7 @@ class ParsedColumn(BaseModel):
     alias_source: str | None = None
     alias_confidence: float | None = None
     needs_review: bool = False
+    sample_values: list[str] = Field(default_factory=list)
 
 
 class HeaderRecommendation(BaseModel):

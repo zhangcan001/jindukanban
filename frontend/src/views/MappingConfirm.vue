@@ -123,9 +123,32 @@
       <el-table :data="roleGroupedMappings" height="560" row-key="excel_column_name">
         <el-table-column prop="field_role" label="字段角色" width="130" />
         <el-table-column prop="excel_column_name" label="Excel 字段" min-width="160" />
+        <el-table-column label="样本值" min-width="220">
+          <template #default="{ row }">
+            <div v-if="row.sample_values?.length" class="sample-values">
+              <el-tag
+                v-for="sample in row.sample_values.slice(0, 3)"
+                :key="`${row.excel_column_name}:${sample}`"
+                size="small"
+                effect="plain"
+              >
+                {{ sample }}
+              </el-tag>
+            </div>
+            <span v-else class="muted-text">-</span>
+          </template>
+        </el-table-column>
         <el-table-column prop="recommended_field" label="推荐字段" min-width="180">
           <template #default="{ row }">
             <span>{{ row.recommended_field || '未识别' }}</span>
+            <el-tag
+              v-if="row.needs_review"
+              size="small"
+              type="danger"
+              effect="plain"
+              style="margin-left: 6px"
+              title="该字段由历史纠错、模糊匹配、AI 或样本值推断得到，建议人工确认"
+            >需复核</el-tag>
             <el-tag
               v-if="row.alias_source === 'history-exact'"
               size="small"
@@ -622,6 +645,8 @@ function buildDefaultMappings(result: ImportParseResponse): FieldMapping[] {
     field_role: column.field_role,
     affects_statistics: column.affects_statistics,
     affects_delay: column.affects_delay,
+    needs_review: column.needs_review ?? false,
+    sample_values: column.sample_values ?? [],
     ...(column as any),
   }))
 }

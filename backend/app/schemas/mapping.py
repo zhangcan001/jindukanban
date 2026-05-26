@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class FieldMapping(BaseModel):
@@ -19,6 +19,8 @@ class FieldMapping(BaseModel):
     field_role: str | None = None
     affects_statistics: bool = False
     affects_delay: bool = False
+    needs_review: bool = False
+    sample_values: list[str] = Field(default_factory=list)
 
 
 class MappingFieldRead(BaseModel):

@@ -174,9 +174,14 @@ def parse_preview(
     preview = data.head(20).where(pd.notna(data), None).to_dict(orient="records")
     columns = []
     for name in data.columns:
-        detected = detect_column(str(name))
+        sample_values = _sample_values(data[name].tolist())
+        detected = detect_column(str(name), sample_values)
         field_type = detected["field_type"] or "unknown"
         explanation = explain_mapping(str(name), detected["recommended_field"], multi_header=multi_header)
+        if detected.get("sample_reason"):
+            explanation["reason"] = f"{explanation['reason']} {detected['sample_reason']}"
+        if detected.get("needs_review"):
+            explanation["confidence"] = "中"
         columns.append(
             {
                 "name": str(name),
@@ -185,6 +190,8 @@ def parse_preview(
                 "is_dimension": field_type == "text",
                 "is_metric": field_type in {"number", "percent", "currency"},
                 "save_to_extra": detected["recommended_field"] is None,
+                "sample_values": sample_values,
+                "needs_review": bool(detected.get("needs_review")),
                 **explanation,
             }
         )
@@ -425,3 +432,21 @@ def _dedupe_columns(columns: list[str]) -> list[str]:
         counts[key] = counts.get(key, 0) + 1
         result.append(key if counts[key] == 1 else f"{key}_{counts[key]}")
     return result
+
+
+def _sample_values(values: list[Any], limit: int = 5) -> list[str]:
+    samples: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        if value is None:
+            continue
+        text = str(value).strip()
+        if not text or text.lower() == "nan":
+            continue
+        if text in seen:
+            continue
+        samples.append(text)
+        seen.add(text)
+        if len(samples) >= limit:
+            break
+    return samples

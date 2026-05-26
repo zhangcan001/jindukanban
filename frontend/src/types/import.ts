@@ -63,8 +63,10 @@ export type ParsedColumn = {
   is_required?: boolean
   affects_statistics?: boolean
   affects_delay?: boolean
-  alias_source?: 'rule' | 'history-exact' | 'history-fuzzy' | null
+  alias_source?: 'rule' | 'history-exact' | 'history-fuzzy' | 'ai_fallback' | null
   alias_confidence?: number | null
+  needs_review?: boolean
+  sample_values?: string[]
 }
 
 export type HeaderRecommendation = {
@@ -89,6 +91,8 @@ export type FieldMapping = {
   field_role?: string | null
   affects_statistics?: boolean
   affects_delay?: boolean
+  needs_review?: boolean
+  sample_values?: string[]
 }
 
 export type FieldDiagnostics = {
