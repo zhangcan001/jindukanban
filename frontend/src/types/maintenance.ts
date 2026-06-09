@@ -74,6 +74,9 @@ export type DataHealth = {
   frozen_batch_count: number | string
   unfrozen_batch_count: number | string
   unpublished_batch_count: number | string
+  draft_batch_count: number | string
+  imported_unpublished_batch_count: number | string
+  parsed_batch_count: number | string
   published_batch_count: number | string
   progress_item_count: number | string
   warning_record_count: number | string

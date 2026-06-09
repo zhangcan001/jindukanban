@@ -3,7 +3,6 @@ from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import StreamingResponse
-from openpyxl import Workbook
 from sqlalchemy import and_, or_, select
 from sqlalchemy.orm import Session
 
@@ -243,6 +242,8 @@ def export_warnings(
     keyword: str | None = None,
     db: Session = Depends(get_db),
 ) -> StreamingResponse:
+    from openpyxl import Workbook
+
     get_project_or_404(project_id, db)
     records = _query_warning_records(
         db,

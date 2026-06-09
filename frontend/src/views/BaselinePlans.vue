@@ -10,6 +10,44 @@
 
     <el-alert v-if="errorMessage" :title="errorMessage" type="error" show-icon :closable="false" />
 
+    <section class="form-surface baseline-wizard">
+      <div class="section-title">
+        <div>
+          <h2>从当前批次生成计划基线</h2>
+          <p>选择已发布批次，系统会绑定该批次任务并生成初始快照。</p>
+        </div>
+        <el-tag type="info">{{ batchOptions.length }} 个已发布批次</el-tag>
+      </div>
+      <el-alert
+        v-if="!batchOptions.length"
+        title="当前项目暂无已发布批次。请先完成导入并发布，再生成计划基线。"
+        type="warning"
+        show-icon
+        :closable="false"
+      />
+      <el-form v-else label-position="top" :model="wizardForm">
+        <div class="form-grid">
+          <el-form-item label="来源批次">
+            <el-select v-model="wizardForm.batch_id" filterable>
+              <el-option v-for="batch in batchOptions" :key="batch.batch_id" :label="batchWizardLabel(batch)" :value="batch.batch_id" />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="基线名称">
+            <el-input v-model="wizardForm.name" placeholder="不填则按数据日期和 Sheet 自动命名" />
+          </el-form-item>
+          <el-form-item label="基线日期">
+            <el-date-picker v-model="wizardForm.baseline_date" type="date" value-format="YYYY-MM-DD" clearable />
+          </el-form-item>
+        </div>
+        <div class="switch-row">
+          <el-checkbox v-model="wizardForm.set_default">生成后设为默认基线</el-checkbox>
+        </div>
+        <div class="actions-row">
+          <el-button type="primary" :loading="generating" @click="generateBaselineFromBatch">生成计划基线与快照</el-button>
+        </div>
+      </el-form>
+    </section>
+
     <section class="form-surface">
       <el-form label-position="top" :model="form">
         <div class="form-grid">
@@ -106,15 +144,18 @@
 
 <script setup lang="ts">
 import { onMounted, reactive, ref } from 'vue'
-import { ElMessageBox } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { useRoute, useRouter } from 'vue-router'
 
+import { getAnalyticsTrend } from '../api/analytics'
 import {
   createBaselinePlan,
+  createBaselinePlanFromBatch,
   listBaselineBoundBatches,
   listBaselinePlans,
   updateBaselinePlan,
 } from '../api/baselinePlans'
+import type { AnalyticsTrendPoint } from '../types/analytics'
 import type { BaselineBoundBatch, BaselinePlan, BaselinePlanPayload } from '../types/baselinePlan'
 
 const route = useRoute()
@@ -127,6 +168,8 @@ const editingId = ref<number | null>(null)
 const errorMessage = ref('')
 const boundDrawerVisible = ref(false)
 const boundBatches = ref<BaselineBoundBatch[]>([])
+const batchOptions = ref<AnalyticsTrendPoint[]>([])
+const generating = ref(false)
 
 const form = reactive<BaselinePlanPayload>({
   name: '',
@@ -135,6 +178,13 @@ const form = reactive<BaselinePlanPayload>({
   baseline_date: null,
   is_default: false,
   is_active: true,
+})
+
+const wizardForm = reactive({
+  batch_id: null as number | null,
+  name: '',
+  baseline_date: null as string | null,
+  set_default: true,
 })
 
 function resetForm() {
@@ -158,6 +208,21 @@ async function loadBaselines() {
   } finally {
     loading.value = false
   }
+}
+
+async function loadPublishedBatches() {
+  try {
+    const trend = await getAnalyticsTrend(projectId)
+    batchOptions.value = [...trend.rows].reverse()
+    wizardForm.batch_id ||= batchOptions.value[0]?.batch_id ?? null
+    wizardForm.baseline_date ||= batchOptions.value[0]?.data_date ?? null
+  } catch {
+    batchOptions.value = []
+  }
+}
+
+async function loadPage() {
+  await Promise.all([loadBaselines(), loadPublishedBatches()])
 }
 
 function editBaseline(baseline: BaselinePlan) {
@@ -186,6 +251,30 @@ async function saveBaseline() {
   }
 }
 
+async function generateBaselineFromBatch() {
+  if (!wizardForm.batch_id) {
+    ElMessage.warning('请先选择已发布批次。')
+    return
+  }
+  generating.value = true
+  errorMessage.value = ''
+  try {
+    const result = await createBaselinePlanFromBatch(projectId, {
+      batch_id: wizardForm.batch_id,
+      name: wizardForm.name.trim() || null,
+      baseline_date: wizardForm.baseline_date,
+      set_default: wizardForm.set_default,
+    })
+    wizardForm.name = ''
+    await loadPage()
+    ElMessage.success(`已生成基线“${result.baseline.name}”，快照包含 ${result.snapshot_item_count} 项任务。`)
+  } catch (error) {
+    errorMessage.value = error instanceof Error ? error.message : '生成计划基线失败'
+  } finally {
+    generating.value = false
+  }
+}
+
 async function setDefault(baseline: BaselinePlan) {
   await updateBaselinePlan(projectId, baseline.id, { is_default: true })
   await loadBaselines()
@@ -208,10 +297,23 @@ async function openBoundBatches(baseline: BaselinePlan) {
   boundDrawerVisible.value = true
 }
 
-onMounted(loadBaselines)
+function batchWizardLabel(batch: AnalyticsTrendPoint) {
+  const date = batch.data_date || batch.published_at?.slice(0, 10) || `批次 ${batch.batch_id}`
+  const sheet = batch.sheet_name || `#${batch.batch_id}`
+  const count = `${batch.item_count ?? 0} 项`
+  const baseline = batch.baseline_plan_name ? `已绑定：${batch.baseline_plan_name}` : '未绑定基线'
+  return `${date} / ${sheet} / ${count} / ${baseline}`
+}
+
+onMounted(loadPage)
 </script>
 
 <style scoped>
+.baseline-wizard {
+  display: grid;
+  gap: 12px;
+}
+
 .baseline-name-cell {
   display: flex;
   align-items: center;

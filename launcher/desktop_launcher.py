@@ -76,11 +76,12 @@ def url_ready(url: str, allow_client_error: bool = False, timeout: float = 2.0) 
 
 
 def wait_url(url: str, seconds: int, log_file: Path, name: str, allow_client_error: bool = False) -> bool:
-    for _ in range(seconds):
+    deadline = time.monotonic() + seconds
+    while time.monotonic() < deadline:
         if url_ready(url, allow_client_error=allow_client_error):
             write_log(log_file, f"{name} ready: {url}")
             return True
-        time.sleep(1)
+        time.sleep(0.25)
     write_log(log_file, f"{name} timeout: {url}")
     return False
 

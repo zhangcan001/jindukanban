@@ -64,7 +64,7 @@
           </el-button>
           <el-button @click="scrollToHistory(report.type)">查看历史</el-button>
           <el-switch
-            v-if="report.type === 'weekly_word'"
+            v-if="report.type === 'weekly_word' && aiConfig.enabled"
             v-model="useAiWeeklyText"
             active-text="使用 AI 优化周报文字"
             inactive-text="使用 AI 优化周报文字"
@@ -148,7 +148,7 @@
         <h2>AI 提示词模板</h2>
         <span>内置模板可复制后修改</span>
       </div>
-      <el-alert :title="aiSafetyNotice" type="warning" show-icon :closable="false" />
+      <el-alert v-if="aiConfig.enabled" :title="aiSafetyNotice" type="warning" show-icon :closable="false" />
       <div class="actions-row" style="margin: 12px 0;">
         <el-button :loading="templatesLoading" :disabled="templatesLoading" @click="loadTemplates">刷新模板</el-button>
         <el-button type="primary" @click="openTemplateEditor()">新建模板</el-button>
@@ -182,7 +182,20 @@
         <h2>AI 辅助设置</h2>
         <span>{{ aiStatusText }}</span>
       </div>
-      <el-alert v-if="aiStatusText === '未启用 AI 辅助'" title="未启用 AI 辅助" type="info" show-icon :closable="false" />
+      <el-alert
+        v-if="!aiConfig.enabled"
+        title="AI 辅助当前关闭。周报会使用系统规则化分析，不影响报表导出。"
+        type="info"
+        show-icon
+        :closable="false"
+      />
+      <el-alert
+        v-else-if="!aiConfig.api_key_set"
+        title="AI 已开启但未配置 API Key，周报会自动回退到规则化分析。"
+        type="warning"
+        show-icon
+        :closable="false"
+      />
       <el-form label-width="160px">
         <el-form-item label="是否启用 AI">
           <el-switch v-model="aiConfig.enabled" />
@@ -306,7 +319,7 @@
     </el-dialog>
 
     <el-dialog v-model="weeklyPreviewVisible" title="Word 周报 AI 预览" width="760px">
-      <el-alert :title="aiSafetyNotice" type="warning" show-icon :closable="false" />
+      <el-alert v-if="aiConfig.enabled" :title="aiSafetyNotice" type="warning" show-icon :closable="false" />
       <pre class="preview-ai-text">{{ weeklyPreviewText }}</pre>
       <template #footer>
         <el-button @click="weeklyPreviewVisible = false">取消</el-button>
@@ -485,13 +498,14 @@ async function loadAll() {
   loading.value = true
   errorMessage.value = ''
   try {
-    // 核心:导出 tab 所需的 5 个请求。AI / 历史 tab 延迟到激活时再拉。
-    const [trend, loadedProfiles, loadedBaselines, project, config] = await Promise.all([
+    // 核心:导出 tab 所需数据先拉齐。AI 模板 / 历史 tab 仍延迟到激活时再拉。
+    const [trend, loadedProfiles, loadedBaselines, project, config, loadedAiConfig] = await Promise.all([
       getAnalyticsTrend(projectId),
       listCalculationProfiles(projectId),
       listBaselinePlans(projectId),
       projectStore.loadProject(projectId),
       getReportConfig(projectId),
+      getAiConfig(projectId),
     ])
     batchOptions.value = trend.rows
     profiles.value = loadedProfiles
@@ -501,6 +515,8 @@ async function loadAll() {
     }
     projectName.value = project.name
     reportConfig.value = config
+    Object.assign(aiConfig, loadedAiConfig)
+    if (!aiConfig.enabled) useAiWeeklyText.value = false
     selectedBatchId.value ||= trend.rows.at(-1)?.batch_id ?? null
     selectedProfileId.value ||= loadedProfiles.find((profile) => profile.is_default)?.id ?? null
     selectedBaselineId.value ||= loadedBaselines.find((baseline) => baseline.is_default)?.id ?? null
@@ -525,6 +541,7 @@ async function loadAiTab(force = false) {
       listAiPromptTemplates(projectId),
     ])
     Object.assign(aiConfig, loadedAiConfig)
+    if (!aiConfig.enabled) useAiWeeklyText.value = false
     promptTemplates.value = loadedTemplates
     apiKeyDraft.value = ''
     aiTabLoaded.value = true
@@ -564,6 +581,7 @@ async function saveAiConfig() {
   try {
     const updated = await updateAiConfig(projectId, aiConfigPayload())
     Object.assign(aiConfig, updated)
+    if (!aiConfig.enabled) useAiWeeklyText.value = false
     apiKeyDraft.value = ''
     ElMessage.success('AI 设置已保存')
   } catch (error) {

@@ -24,10 +24,17 @@ export default defineConfig({
     build: {
         chunkSizeWarningLimit: 1200,
         rollupOptions: {
+            onwarn(warning, warn) {
+                if (warning.code === 'INVALID_ANNOTATION'
+                    && typeof warning.id === 'string'
+                    && warning.id.includes('@vueuse/core')) {
+                    return;
+                }
+                warn(warning);
+            },
             output: {
                 manualChunks: {
                     vue: ['vue', 'vue-router'],
-                    charts: ['echarts'],
                 },
             },
         },

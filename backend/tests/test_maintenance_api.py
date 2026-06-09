@@ -321,9 +321,13 @@ def test_data_health_backup_records_safe_cleanup_and_logs(tmp_path, monkeypatch)
         db.flush()
         published = ImportBatch(project_id=project.id, file_name="published.csv", status="published", is_frozen=True)
         draft = ImportBatch(project_id=project.id, file_name="draft.csv", status="draft")
-        db.add_all([published, draft])
+        parsed = ImportBatch(project_id=project.id, file_name="parsed.csv", status="parsed")
+        imported = ImportBatch(project_id=project.id, file_name="imported.csv", status="imported")
+        db.add_all([published, draft, parsed, imported])
         db.commit()
         draft_id = draft.id
+        parsed_id = parsed.id
+        imported_id = imported.id
         published_id = published.id
     finally:
         db.close()
@@ -339,7 +343,10 @@ def test_data_health_backup_records_safe_cleanup_and_logs(tmp_path, monkeypatch)
     health_data = health.json()
     assert health_data["frozen_batch_count"] == 1
     assert health_data["published_batch_count"] == 1
-    assert health_data["unpublished_batch_count"] == 1
+    assert health_data["unpublished_batch_count"] == 3
+    assert health_data["draft_batch_count"] == 1
+    assert health_data["parsed_batch_count"] == 1
+    assert health_data["imported_unpublished_batch_count"] == 1
     assert health_data["total_backup_count"] == 2
     assert health_data["incomplete_backup_count"] == 1
     assert "maintenance_log_count" in health_data
@@ -356,18 +363,20 @@ def test_data_health_backup_records_safe_cleanup_and_logs(tmp_path, monkeypatch)
     assert incomplete_record["validation_status"] == "不完整"
     assert "database" in incomplete_record["missing_items"]
     preview_data = preview.json()
-    assert preview_data["matched_ids"] == [draft_id]
-    assert preview_data["affected_count"] == 1
-    assert preview_data["details"][0]["id"] == draft_id
+    assert set(preview_data["matched_ids"]) == {draft_id, parsed_id, imported_id}
+    assert preview_data["affected_count"] == 3
+    assert {detail["id"] for detail in preview_data["details"]} == {draft_id, parsed_id, imported_id}
     assert preview_data["cleanup_type"] == "unpublished_batches"
-    assert cleanup.json()["cleaned_count"] == 1
-    assert cleanup.json()["affected_count"] == 1
+    assert cleanup.json()["cleaned_count"] == 3
+    assert cleanup.json()["affected_count"] == 3
     assert cleanup.json()["log_written"] is True
 
     db = SessionLocal()
     try:
         assert db.get(ImportBatch, published_id).is_active is True
         assert db.get(ImportBatch, draft_id).is_active is False
+        assert db.get(ImportBatch, parsed_id).is_active is False
+        assert db.get(ImportBatch, imported_id).is_active is False
         assert db.query(MaintenanceLog).filter(MaintenanceLog.action == "cleanup_unpublished_batches").count() == 1
     finally:
         db.close()

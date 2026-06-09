@@ -1,13 +1,21 @@
 ﻿from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models.baseline_plan import BaselinePlan
 from app.models.baseline_plan_snapshot import BaselinePlanSnapshot
 from app.models.import_batch import ImportBatch
+from app.models.progress_item import ProgressItem
 from app.models.project import Project
-from app.schemas.baseline_plan import BaselineBoundBatch, BaselinePlanCreate, BaselinePlanRead, BaselinePlanUpdate
+from app.schemas.baseline_plan import (
+    BaselineBoundBatch,
+    BaselinePlanCreate,
+    BaselinePlanFromBatchCreate,
+    BaselinePlanFromBatchRead,
+    BaselinePlanRead,
+    BaselinePlanUpdate,
+)
 from app.schemas.baseline_snapshot import BaselineSnapshotCreate, BaselineSnapshotDiff, BaselineSnapshotRead
 from app.services.baseline_snapshot_service import (
     compute_snapshot_diff,
@@ -71,6 +79,72 @@ def create_baseline_plan(
     db.commit()
     db.refresh(baseline)
     return _read_baseline(db, baseline)
+
+
+@router.post("/from-current-batch", response_model=BaselinePlanFromBatchRead, status_code=status.HTTP_201_CREATED)
+def create_baseline_from_current_batch(
+    project_id: int,
+    payload: BaselinePlanFromBatchCreate,
+    db: Session = Depends(get_db),
+) -> BaselinePlanFromBatchRead:
+    project = get_project_or_404(project_id, db)
+    if project.is_archived:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="项目已归档，不能生成计划基线。")
+
+    batch = _resolve_source_batch(project_id, payload.batch_id, db)
+    if batch is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="当前项目暂无已发布批次，不能生成计划基线。")
+
+    item_count = db.scalar(
+        select(func.count(ProgressItem.id)).where(
+            ProgressItem.project_id == project_id,
+            ProgressItem.batch_id == batch.id,
+        )
+    ) or 0
+    if item_count <= 0:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="所选批次没有进度明细，不能生成计划基线。")
+
+    baseline_date = payload.baseline_date or batch.data_date
+    baseline = BaselinePlan(
+        project_id=project_id,
+        name=payload.name or _default_baseline_name(batch),
+        plan_type="current",
+        description=payload.description or f"由已发布批次 #{batch.id}（{batch.sheet_name or batch.file_name}）生成。",
+        baseline_date=baseline_date,
+        is_default=payload.set_default,
+        is_active=True,
+    )
+    db.add(baseline)
+    db.flush()
+
+    if payload.set_default or project.default_baseline_plan_id is None:
+        apply_default_baseline(project, baseline, db)
+
+    batch.baseline_plan_id = baseline.id
+    db.execute(
+        update(ProgressItem)
+        .where(ProgressItem.project_id == project_id, ProgressItem.batch_id == batch.id)
+        .values(baseline_plan_id=baseline.id)
+    )
+
+    snapshot = create_snapshot(
+        db,
+        baseline,
+        label="初始计划基线快照",
+        description=f"由批次 #{batch.id} 自动生成。",
+        snapshot_date=baseline_date,
+        created_by="system",
+    )
+    db.commit()
+    db.refresh(baseline)
+    db.refresh(snapshot)
+    return BaselinePlanFromBatchRead(
+        baseline=_read_baseline(db, baseline),
+        snapshot_id=snapshot.id,
+        snapshot_item_count=snapshot.item_count,
+        batch_id=batch.id,
+        batch_name=batch.sheet_name or batch.file_name,
+    )
 
 
 @router.get("/{baseline_id}/batches", response_model=list[BaselineBoundBatch])
@@ -230,3 +304,28 @@ def _read_bound_batch(batch: ImportBatch, baseline_name: str | None) -> Baseline
     return BaselineBoundBatch.model_validate(batch).model_copy(
         update={"baseline_plan_id": batch.baseline_plan_id, "baseline_plan_name": baseline_name}
     )
+
+
+def _resolve_source_batch(project_id: int, batch_id: int | None, db: Session) -> ImportBatch | None:
+    statement = select(ImportBatch).where(
+        ImportBatch.project_id == project_id,
+        ImportBatch.is_active.is_(True),
+        ImportBatch.status == "published",
+    )
+    if batch_id is not None:
+        statement = statement.where(ImportBatch.id == batch_id)
+    else:
+        statement = statement.order_by(
+            ImportBatch.data_date.is_(None),
+            ImportBatch.data_date.desc(),
+            ImportBatch.published_at.desc().nullslast(),
+            ImportBatch.created_at.desc(),
+            ImportBatch.id.desc(),
+        )
+    return db.scalars(statement).first()
+
+
+def _default_baseline_name(batch: ImportBatch) -> str:
+    date_part = batch.data_date.isoformat() if batch.data_date else f"批次{batch.id}"
+    sheet_part = f" - {batch.sheet_name}" if batch.sheet_name else ""
+    return f"{date_part}{sheet_part} 计划基线"

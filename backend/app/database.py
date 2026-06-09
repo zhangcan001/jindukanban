@@ -1,4 +1,5 @@
 from collections.abc import Generator
+import ast
 import logging
 from pathlib import Path
 
@@ -42,6 +43,7 @@ if settings.database_url.startswith("sqlite"):
 
 _BACKEND_DIR = Path(__file__).resolve().parents[1]
 _ALEMBIC_INI = _BACKEND_DIR / "alembic.ini"
+_ALEMBIC_VERSIONS_DIR = _BACKEND_DIR / "alembic" / "versions"
 
 
 def _alembic_config():
@@ -71,7 +73,65 @@ def _stamp_existing_pre_alembic_db() -> bool:
     return True
 
 
+def _migration_heads_from_files() -> set[str]:
+    revisions: set[str] = set()
+    down_revisions: set[str] = set()
+    for path in _ALEMBIC_VERSIONS_DIR.glob("*.py"):
+        try:
+            tree = ast.parse(path.read_text(encoding="utf-8"))
+        except (OSError, SyntaxError):
+            return set()
+        revision = None
+        down_revision = None
+        for node in tree.body:
+            target_nodes: list[ast.expr] = []
+            value_node = None
+            if isinstance(node, ast.Assign):
+                target_nodes = list(node.targets)
+                value_node = node.value
+            elif isinstance(node, ast.AnnAssign):
+                target_nodes = [node.target]
+                value_node = node.value
+            for target in target_nodes:
+                if isinstance(target, ast.Name) and target.id in {"revision", "down_revision"} and value_node is not None:
+                    try:
+                        value = ast.literal_eval(value_node)
+                    except (TypeError, ValueError):
+                        value = None
+                    if target.id == "revision" and isinstance(value, str):
+                        revision = value
+                    elif target.id == "down_revision":
+                        down_revision = value
+        if revision:
+            revisions.add(revision)
+        if isinstance(down_revision, str):
+            down_revisions.add(down_revision)
+        elif isinstance(down_revision, (list, tuple)):
+            down_revisions.update(value for value in down_revision if isinstance(value, str))
+    return revisions - down_revisions
+
+
+def _database_at_migration_head() -> bool:
+    heads = _migration_heads_from_files()
+    if not heads:
+        return False
+    try:
+        with engine.connect() as connection:
+            table_exists = connection.execute(
+                text("SELECT 1 FROM sqlite_master WHERE type='table' AND name='alembic_version'")
+            ).first()
+            if table_exists is None:
+                return False
+            rows = connection.execute(text("SELECT version_num FROM alembic_version")).all()
+    except Exception:
+        return False
+    current = {str(row[0]) for row in rows if row[0]}
+    return current == heads
+
+
 def run_migrations() -> None:
+    if _database_at_migration_head():
+        return
     import app.models  # noqa: F401  ensure metadata is loaded
 
     _stamp_existing_pre_alembic_db()

@@ -327,6 +327,8 @@ function statusLabel(value?: string | null) {
     normal: '正常',
     slightly_delayed: '轻微滞后',
     delayed: '明显滞后',
+    delayed_or_worse: '明显及以上滞后',
+    any_delayed: '全部滞后',
     seriously_delayed: '严重滞后',
     seriously_delay: '严重滞后',
     not_started_by_plan: '未到计划开始',

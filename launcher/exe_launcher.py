@@ -91,10 +91,11 @@ def url_ready(url: str, allow_client_error: bool = False, timeout: float = 2.0) 
 
 
 def wait_url(url: str, name: str, allow_client_error: bool = False, seconds: int = 35) -> bool:
-    for _ in range(seconds):
+    deadline = time.monotonic() + seconds
+    while time.monotonic() < deadline:
         if url_ready(url, allow_client_error=allow_client_error):
             return True
-        time.sleep(1)
+        time.sleep(0.25)
     write_status(f"[错误] {name} 超时：{url}")
     return False
 

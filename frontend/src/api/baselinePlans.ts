@@ -1,5 +1,11 @@
 import { request } from './http'
-import type { BaselineBoundBatch, BaselinePlan, BaselinePlanPayload } from '../types/baselinePlan'
+import type {
+  BaselineBoundBatch,
+  BaselinePlan,
+  BaselinePlanFromBatchPayload,
+  BaselinePlanFromBatchResult,
+  BaselinePlanPayload,
+} from '../types/baselinePlan'
 
 export function listBaselinePlans(projectId: number) {
   return request<BaselinePlan[]>(`/api/projects/${projectId}/baseline-plans`)
@@ -7,6 +13,13 @@ export function listBaselinePlans(projectId: number) {
 
 export function createBaselinePlan(projectId: number, payload: BaselinePlanPayload) {
   return request<BaselinePlan>(`/api/projects/${projectId}/baseline-plans`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+}
+
+export function createBaselinePlanFromBatch(projectId: number, payload: BaselinePlanFromBatchPayload) {
+  return request<BaselinePlanFromBatchResult>(`/api/projects/${projectId}/baseline-plans/from-current-batch`, {
     method: 'POST',
     body: JSON.stringify(payload),
   })
