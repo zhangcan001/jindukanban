@@ -1315,6 +1315,56 @@ def test_multi_sheet_saved_template_records_sheet_name_and_field_structure(tmp_p
         db.close()
 
 
+def test_successful_import_auto_saves_mapping_template_when_no_template_selected(tmp_path: Path) -> None:
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = "自动模板"
+    sheet.append(["工作内容", "楼号", "层", "实际完成率", "计划完成率"])
+    sheet.append(["桥架安装", "1号楼", "3F", "40%", "60%"])
+    file_path = tmp_path / "auto-template.xlsx"
+    workbook.save(file_path)
+    mappings = [
+        {"excel_column_name": "工作内容", "system_field_name": "task_name", "field_type": "text"},
+        {"excel_column_name": "楼号", "system_field_name": "building", "field_type": "text"},
+        {"excel_column_name": "层", "system_field_name": "floor", "field_type": "text"},
+        {"excel_column_name": "实际完成率", "system_field_name": "actual_percent", "field_type": "percent"},
+        {"excel_column_name": "计划完成率", "system_field_name": "planned_percent", "field_type": "percent"},
+    ]
+
+    with TestClient(app) as client:
+        project_id = client.post("/api/projects", json={"name": "自动保存映射模板"}).json()["id"]
+        with file_path.open("rb") as file:
+            upload = client.post(
+                f"/api/projects/{project_id}/imports/upload",
+                files={"file": (file_path.name, file, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")},
+            )
+        batch_id = upload.json()["batch"]["id"]
+        client.post(f"/api/imports/{batch_id}/parse", json={"sheet_name": "自动模板", "header_row_index": 1, "data_start_row_index": 2})
+        confirm = client.post(f"/api/imports/{batch_id}/confirm", json={"import_strategy": "new_batch", "field_mappings": mappings})
+
+    assert confirm.status_code == 200
+    assert confirm.json()["template_id"] is not None
+
+    db = SessionLocal()
+    try:
+        templates = db.query(MappingTemplate).filter(MappingTemplate.project_id == project_id).all()
+        batch = db.get(ImportBatch, batch_id)
+        field_structure = json.loads(templates[0].field_structure)
+    finally:
+        db.close()
+
+    assert len(templates) == 1
+    assert batch.mapping_template_id == templates[0].id
+    assert templates[0].sheet_name == "自动模板"
+    assert [column["system_field_name"] for column in field_structure["columns"]] == [
+        "task_name",
+        "building",
+        "floor",
+        "actual_percent",
+        "planned_percent",
+    ]
+
+
 def _upload_and_parse_sample(client: TestClient, project_id: int, data_date: str) -> int:
     sample_path = SAMPLE_DIR / "sample_progress_a.csv"
     with sample_path.open("rb") as file:

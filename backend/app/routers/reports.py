@@ -13,17 +13,12 @@ from app.models.import_batch import ImportBatch
 from app.models.rectification_item import RectificationItem
 from app.models.report_export_record import ReportExportRecord
 from app.schemas.report import ReportConfig, ReportExportRead, ReportPreviewResponse
-from app.services.report_service import (
+from app.services.report_metadata import (
     DASHBOARD_EXCEL_TYPE,
     DELAY_RECTIFICATION_EXCEL_TYPE,
     REPORT_TYPES,
     WEEKLY_PDF_TYPE,
     WEEKLY_WORD_TYPE,
-    create_dashboard_export,
-    create_delay_rectification_export,
-    create_report,
-    create_weekly_pdf_report,
-    create_weekly_word_report,
     resolve_report_config,
     serialize_report_config,
 )
@@ -201,6 +196,8 @@ def export_dashboard(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Only xlsx export is supported")
     calculation_method = effective_calculation_method(project, calculation_method)
     try:
+        from app.services.report_service import create_dashboard_export
+
         record = create_dashboard_export(
             db,
             project,
@@ -253,6 +250,8 @@ def export_weekly_word(
         )
     try:
         calculation_method = effective_calculation_method(project, calculation_method)
+        from app.services.report_service import create_weekly_word_report
+
         record = create_weekly_word_report(db, project, batch_id, calculation_profile_id, baseline_plan_id, building, use_ai_text, calculation_method)
     except LookupError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail={"code": "NO_PUBLISHED_BATCH", "message": "当前暂无可导出数据。"}) from exc
@@ -287,6 +286,8 @@ def export_weekly_pdf(
         )
     try:
         calculation_method = effective_calculation_method(project, calculation_method)
+        from app.services.report_service import create_weekly_pdf_report
+
         record = create_weekly_pdf_report(db, project, batch_id, calculation_profile_id, baseline_plan_id, building, use_ai, calculation_method)
     except LookupError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail={"code": "NO_PUBLISHED_BATCH", "message": "当前暂无可导出数据。"}) from exc
@@ -325,10 +326,12 @@ def export_delay_rectification(
     if format != "xlsx":
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Only xlsx export is supported")
     delay_level = _normalize_delay_level(delay_level)
-    if delay_level not in {None, "", "seriously_delayed", "delayed", "slightly_delayed"}:
+    if delay_level not in {None, "", "seriously_delayed", "delayed_or_worse", "any_delayed", "delayed", "slightly_delayed"}:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unsupported delay_level")
     try:
         calculation_method = effective_calculation_method(project, calculation_method)
+        from app.services.report_service import create_delay_rectification_export
+
         record = create_delay_rectification_export(
             db,
             project,
@@ -358,6 +361,8 @@ def export_delay_rectification(
 def _normalize_delay_level(value: str | None) -> str | None:
     labels = {
         "严重滞后": "seriously_delayed",
+        "明显及以上滞后": "delayed_or_worse",
+        "全部滞后": "any_delayed",
         "明显滞后": "delayed",
         "轻微滞后": "slightly_delayed",
         "seriously_delay": "seriously_delayed",
@@ -449,6 +454,14 @@ def export_report(
             detail={"code": "REPORT_TYPE_NOT_FOUND", "message": "报表类型不存在或未注册。"},
         )
     try:
+        from app.services.report_service import (
+            create_dashboard_export,
+            create_delay_rectification_export,
+            create_report,
+            create_weekly_pdf_report,
+            create_weekly_word_report,
+        )
+
         if report_type == DASHBOARD_EXCEL_TYPE:
             record = create_dashboard_export(db, project, batch_id, calculation_profile_id, baseline_plan_id)
         elif report_type == WEEKLY_WORD_TYPE:

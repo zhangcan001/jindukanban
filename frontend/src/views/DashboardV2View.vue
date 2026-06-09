@@ -181,6 +181,19 @@
               <div class="building-view-actions">
                 <el-tag v-if="filters.building" type="warning" effect="light">全局筛选：{{ filters.building }}</el-tag>
                 <el-tag v-else-if="selectedBuildingName" effect="plain">当前查看：{{ selectedBuildingName }}</el-tag>
+                <el-button-group class="delay-quick-actions">
+                  <el-tooltip v-for="item in delayQuickFilters" :key="item.value" :content="item.tip" placement="top">
+                    <el-button
+                      size="small"
+                      :type="filters.status === item.value ? 'primary' : 'default'"
+                      :disabled="loading"
+                      @click="applyDelayQuickFilter(item.value)"
+                    >
+                      {{ item.label }}
+                    </el-button>
+                  </el-tooltip>
+                  <el-button v-if="filters.status" size="small" :disabled="loading" @click="clearDelayFilter">清除滞后</el-button>
+                </el-button-group>
                 <el-button v-if="filters.building" size="small" :disabled="loading" @click="clearBuildingFilter">退出楼栋筛选</el-button>
                 <el-button v-else-if="selectedBuildingName" size="small" :disabled="loading" @click="applyBuildingFilter(selectedBuildingName)">筛选此楼栋</el-button>
               </div>
@@ -363,9 +376,16 @@
         <el-table-column label="偏差" width="90">
           <template #default="{ row }">{{ signedPercent(row.progress_deviation) }}</template>
         </el-table-column>
+        <el-table-column label="操作" width="110">
+          <template #default="{ row }">
+            <el-button link type="primary" @click="goProgressItem(row)">查看明细</el-button>
+          </template>
+        </el-table-column>
       </el-table>
       <div class="floor-detail-actions">
         <el-button type="primary" @click="applySelectedFloorFilter">筛选此楼层</el-button>
+        <el-button @click="applyFloorDelayFilter('delayed_or_worse')">只看明显及以上</el-button>
+        <el-button @click="applyFloorDelayFilter('seriously_delayed')">只看严重滞后</el-button>
         <el-button @click="goProgressItemsForFloor">查看进度明细</el-button>
         <el-button @click="goRectificationsForFloor">查看整改闭环</el-button>
         <el-button :loading="exporting" @click="handleExportSelectedFloor">导出当前楼层看板</el-button>
@@ -543,7 +563,7 @@ const activeFilterTags = computed(() => {
     filters.discipline && `专业：${filters.discipline}`,
     filters.building && `楼栋：${filters.building}`,
     filters.floor && `楼层：${filters.floor}`,
-    filters.status && `状态：${filters.status}`,
+    filters.status && `状态：${statusText(filters.status)}`,
     filters.systemName && `系统：${filters.systemName}`,
     filters.constructionUnit && `施工单位：${filters.constructionUnit}`,
   ]
@@ -567,8 +587,16 @@ const statusOptions = [
   { value: 'normal', label: '正常' },
   { value: 'slightly_delayed', label: '轻微滞后' },
   { value: 'delayed', label: '明显滞后' },
+  { value: 'delayed_or_worse', label: '明显及以上滞后' },
+  { value: 'any_delayed', label: '全部滞后' },
   { value: 'seriously_delayed', label: '严重滞后' },
   { value: 'not_started_by_plan', label: '计划开始时间未到，暂不纳入滞后判断' },
+]
+
+const delayQuickFilters = [
+  { value: 'seriously_delayed', label: '严重', tip: '只看严重滞后任务和楼层' },
+  { value: 'delayed_or_worse', label: '明显+', tip: '只看明显滞后和严重滞后' },
+  { value: 'any_delayed', label: '全部滞后', tip: '包含轻微、明显、严重滞后' },
 ]
 
 const elevationLegend = [
@@ -714,6 +742,31 @@ function clearFloorFilter() {
   loadDashboard()
 }
 
+function applyDelayQuickFilter(status: string) {
+  skipNextFilterWatch = true
+  filters.status = status
+  viewMode.value = 'building'
+  loadDashboard()
+}
+
+function clearDelayFilter() {
+  skipNextFilterWatch = true
+  filters.status = ''
+  loadDashboard()
+}
+
+function applyFloorDelayFilter(status: string) {
+  if (!selectedFloorDetail.value) return
+  skipNextFilterWatch = true
+  filters.building = selectedFloorBuilding.value
+  filters.floor = selectedFloorDetail.value.floor
+  filters.status = status
+  selectedBuilding.value = selectedFloorBuilding.value
+  viewMode.value = 'building'
+  floorDetailVisible.value = false
+  loadDashboard()
+}
+
 function closeFloorDetail() {
   floorDetailVisible.value = false
 }
@@ -731,6 +784,18 @@ function goProgressItemsForFloor() {
     query: buildScopeQuery({
       building: selectedFloorBuilding.value,
       floor: selectedFloorDetail.value.floor,
+    }),
+  })
+}
+
+function goProgressItem(row: { task_name?: string | null; task_code?: string | null; wbs_code?: string | null; delay_level?: string | null }) {
+  router.push({
+    path: `/projects/${projectId}/progress-items`,
+    query: buildScopeQuery({
+      building: selectedFloorBuilding.value,
+      floor: selectedFloorDetail.value?.floor,
+      status: row.delay_level || filters.status || undefined,
+      keyword: row.task_code || row.wbs_code || row.task_name || undefined,
     }),
   })
 }
@@ -852,6 +917,10 @@ function statusLabel(value?: number | null) {
   return value > 0 ? '超前' : '正常'
 }
 
+function statusText(value?: string | null) {
+  return statusOptions.find((item) => item.value === value)?.label || value || '-'
+}
+
 function statusTagType(value?: number | null) {
   if (value === null || value === undefined) return 'info'
   if (value < -20) return 'danger'
@@ -861,6 +930,7 @@ function statusTagType(value?: number | null) {
 
 function statusClass(status?: string | null) {
   if (status === 'seriously_delayed') return 'is-red'
+  if (status === 'delayed_or_worse' || status === 'any_delayed') return 'is-orange'
   if (status === 'delayed') return 'is-orange'
   if (status === 'slightly_delayed') return 'is-yellow'
   if (status === 'not_started_by_plan') return 'is-gray'
@@ -1308,6 +1378,11 @@ function diagnosticRate(key: string) {
   align-items: center;
   justify-content: flex-end;
   gap: 8px;
+  flex-wrap: wrap;
+}
+
+.delay-quick-actions {
+  display: inline-flex;
   flex-wrap: wrap;
 }
 

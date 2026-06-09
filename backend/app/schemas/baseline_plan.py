@@ -50,3 +50,19 @@ class BaselineBoundBatch(BaseModel):
     baseline_plan_name: str | None = None
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class BaselinePlanFromBatchCreate(BaseModel):
+    batch_id: int | None = None
+    name: str | None = None
+    baseline_date: date | None = None
+    description: str | None = None
+    set_default: bool = True
+
+
+class BaselinePlanFromBatchRead(BaseModel):
+    baseline: BaselinePlanRead
+    snapshot_id: int
+    snapshot_item_count: int
+    batch_id: int
+    batch_name: str

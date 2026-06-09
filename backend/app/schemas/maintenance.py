@@ -82,6 +82,9 @@ class DataHealthResponse(BaseModel):
     frozen_batch_count: int | str = 0
     unfrozen_batch_count: int | str = 0
     unpublished_batch_count: int | str = 0
+    draft_batch_count: int | str = 0
+    imported_unpublished_batch_count: int | str = 0
+    parsed_batch_count: int | str = 0
     published_batch_count: int | str = 0
     progress_item_count: int | str = 0
     warning_record_count: int | str = 0

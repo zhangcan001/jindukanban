@@ -8,7 +8,6 @@ from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import StreamingResponse
-from openpyxl import Workbook
 from sqlalchemy import and_, case, func, or_, select
 from sqlalchemy.orm import Session
 
@@ -412,6 +411,8 @@ def export_rectifications(
     calculation_method: str | None = None,
     db: Session = Depends(get_db),
 ) -> StreamingResponse:
+    from openpyxl import Workbook
+
     project = get_project_or_404(project_id, db)
     method_context = _calculation_method_context(db, project, batch_id, calculation_method)
     scoped_batch_ids = _resolve_scope_batch_ids(db, project_id, scope, batch_id, data_date, import_group_id, batch_ids)

@@ -61,6 +61,8 @@ CONSTRUCTION_UNIT_ALIASES = ("施工单位", "分包单位", "责任单位", "�
 
 DELAY_STATUS_LABELS = {
     "seriously_delayed": "严重滞后",
+    "delayed_or_worse": "明显及以上滞后",
+    "any_delayed": "全部滞后",
     "delayed": "明显滞后",
     "slightly_delayed": "轻微滞后",
     "normal": "正常",
@@ -566,7 +568,11 @@ def _apply_filters(items: list[ProgressItem], reference_date: date, **filters: s
             filtered = [item for item in filtered if getter(item) == value]
     status = _clean(filters.get("status"))
     if status:
-        filtered = [item for item in filtered if (item.status == status or _delay_status(item, reference_date) == status)]
+        filtered = [
+            item
+            for item in filtered
+            if item.status == status or _status_matches(_delay_status(item, reference_date), status)
+        ]
     return filtered
 
 
@@ -718,6 +724,16 @@ def _delay_status(
     if deviation is None:
         return item.status if item.status in {"completed", "normal", "ahead"} else "unknown"
     return classify_delay_status(deviation, thresholds)
+
+
+def _status_matches(actual: str | None, requested: str) -> bool:
+    if actual == requested:
+        return True
+    if requested == "delayed_or_worse":
+        return actual in {"seriously_delayed", "delayed"}
+    if requested == "any_delayed":
+        return actual in {"seriously_delayed", "delayed", "slightly_delayed"}
+    return False
 
 
 def _sorted_unique(values: Iterable[str | None], dimension: str) -> list[str]:

@@ -1,11 +1,9 @@
 from __future__ import annotations
 
-from datetime import date, datetime, time
+from datetime import date, datetime, time, timedelta
 import math
 import re
 from typing import Any
-
-from openpyxl.utils.datetime import from_excel
 
 
 EMPTY_DATE_MARKERS = {"", "--", "/", "nan", "nat", "none", "null"}
@@ -33,9 +31,8 @@ def normalize_date(value: Any) -> date | None:
     if isinstance(value, int | float) and not isinstance(value, bool):
         if isinstance(value, float) and math.isnan(value):
             return None
-        try:
-            excel_value = from_excel(value)
-        except (TypeError, ValueError, OverflowError):
+        excel_value = _from_excel_serial(value)
+        if excel_value is None:
             return None
         if isinstance(excel_value, datetime):
             return excel_value.date()
@@ -76,6 +73,19 @@ def _normalize_date_text(text: str) -> str:
         year, month, day = chinese.groups()
         return f"{year}-{int(month):02d}-{int(day):02d}"
     return normalized
+
+
+def _from_excel_serial(value: int | float) -> datetime | None:
+    number = float(value)
+    if number < 0 or 0 <= number < 1:
+        return None
+    day, fraction = divmod(number, 1)
+    if 0 < number < 60:
+        day += 1
+    try:
+        return datetime(1899, 12, 30) + timedelta(days=int(day), seconds=round(fraction * 86400))
+    except (OverflowError, ValueError):
+        return None
 
 
 def _is_pandas_timestamp(value: Any) -> bool:

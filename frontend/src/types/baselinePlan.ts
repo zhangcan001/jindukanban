@@ -28,3 +28,19 @@ export type BaselineBoundBatch = {
   baseline_plan_id?: number | null
   baseline_plan_name?: string | null
 }
+
+export type BaselinePlanFromBatchPayload = {
+  batch_id?: number | null
+  name?: string | null
+  baseline_date?: string | null
+  description?: string | null
+  set_default?: boolean
+}
+
+export type BaselinePlanFromBatchResult = {
+  baseline: BaselinePlan
+  snapshot_id: number
+  snapshot_item_count: number
+  batch_id: number
+  batch_name: string
+}

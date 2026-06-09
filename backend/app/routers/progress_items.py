@@ -110,7 +110,8 @@ def list_progress_items(
     if system_name:
         base = base.where(ProgressItem.system_name == system_name)
     if status:
-        base = base.where(ProgressItem.status == status)
+        status_values = _status_filter_values(status)
+        base = base.where(ProgressItem.status.in_(status_values) if len(status_values) > 1 else ProgressItem.status == status_values[0])
     if keyword:
         like_keyword = f"%{keyword.strip()}%"
         base = base.where(
@@ -529,6 +530,14 @@ def _single_data_date(batches: list[ImportBatch]) -> date | None:
 def _single_import_group_id(batches: list[ImportBatch]) -> str | None:
     values = {batch.import_group_id for batch in batches if batch.import_group_id}
     return next(iter(values)) if len(values) == 1 else None
+
+
+def _status_filter_values(value: str) -> list[str]:
+    if value == "delayed_or_worse":
+        return ["seriously_delayed", "delayed"]
+    if value == "any_delayed":
+        return ["seriously_delayed", "delayed", "slightly_delayed"]
+    return [value]
 
 
 def _find_previous_item(db: Session, item: ProgressItem, batch: ImportBatch | None) -> ProgressItem | None:

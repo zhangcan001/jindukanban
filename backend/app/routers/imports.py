@@ -43,16 +43,10 @@ from app.schemas.validation import (
     MultiSheetValidationResult,
     summarize_issue_codes,
 )
-from app.services.import_confirm_service import confirm_import_batch
-from app.services.import_error_report_service import build_error_report_workbook
-from app.services.data_quality_service import calculate_data_quality_score
-from app.services.excel_parser import ExcelParseError, get_sheet_names, infer_multi_header_end, parse_preview, parse_rows, recommend_header_rows, resolve_header_rows, _read_raw
 from app.services.field_mapping_validator import validate_field_mappings
 from app.services.field_diagnostics_service import build_item_diagnostics, build_mapping_diagnostics, build_parse_field_diagnostics
-from app.services.import_validator import build_abnormal_preview, should_skip_import, validate_import_rows
 from app.services.template_matcher import match_templates
 from app.services.column_alias_service import enrich_columns_with_aliases
-from app.services.ai_column_resolver import apply_ai_fallback_to_columns
 from app.models.progress_item import ProgressItem
 from app.schemas.mapping import FieldMapping
 
@@ -60,6 +54,126 @@ router = APIRouter(tags=["imports"])
 
 UPLOAD_DIR = Path(get_settings().upload_dir)
 SUPPORTED_SUFFIXES = {".xlsx", ".csv"}
+
+
+def _excel_parser():
+    from app.services import excel_parser
+
+    return excel_parser
+
+
+def _import_validator():
+    from app.services import import_validator
+
+    return import_validator
+
+
+class ExcelParseError(ValueError):
+    def __init__(self, message: str, code: str = "EXCEL_PARSE_ERROR") -> None:
+        super().__init__(message)
+        self.code = code
+
+
+def _raise_excel_error(exc: Exception) -> None:
+    raise ExcelParseError(str(exc), getattr(exc, "code", "EXCEL_PARSE_ERROR")) from exc
+
+
+def get_sheet_names(file_path: str):
+    parser = _excel_parser()
+    try:
+        return parser.get_sheet_names(file_path)
+    except parser.ExcelParseError as exc:
+        _raise_excel_error(exc)
+
+
+def _read_raw(file_path: str, sheet_name: str):
+    parser = _excel_parser()
+    try:
+        return parser._read_raw(file_path, sheet_name)
+    except parser.ExcelParseError as exc:
+        _raise_excel_error(exc)
+
+
+def resolve_header_rows(file_path: str, sheet_name: str, header_row_index: int | None, data_start_row_index: int | None):
+    parser = _excel_parser()
+    try:
+        return parser.resolve_header_rows(file_path, sheet_name, header_row_index, data_start_row_index)
+    except parser.ExcelParseError as exc:
+        _raise_excel_error(exc)
+
+
+def infer_multi_header_end(raw, header_row_index: int):
+    return _excel_parser().infer_multi_header_end(raw, header_row_index)
+
+
+def recommend_header_rows(raw):
+    return _excel_parser().recommend_header_rows(raw)
+
+
+def parse_preview(
+    file_path: str,
+    sheet_name: str,
+    header_row_index: int | None,
+    data_start_row_index: int | None,
+    multi_header: bool,
+    header_end_row_index: int | None,
+):
+    parser = _excel_parser()
+    try:
+        return parser.parse_preview(file_path, sheet_name, header_row_index, data_start_row_index, multi_header, header_end_row_index)
+    except parser.ExcelParseError as exc:
+        _raise_excel_error(exc)
+
+
+def parse_rows(
+    file_path: str,
+    sheet_name: str,
+    header_row_index: int,
+    data_start_row_index: int,
+    multi_header: bool,
+    header_end_row_index: int | None,
+):
+    parser = _excel_parser()
+    try:
+        return parser.parse_rows(file_path, sheet_name, header_row_index, data_start_row_index, multi_header, header_end_row_index)
+    except parser.ExcelParseError as exc:
+        _raise_excel_error(exc)
+
+
+def validate_import_rows(rows, mappings):
+    return _import_validator().validate_import_rows(rows, mappings)
+
+
+def build_abnormal_preview(rows, issues):
+    return _import_validator().build_abnormal_preview(rows, issues)
+
+
+def should_skip_import(row):
+    return _import_validator().should_skip_import(row)
+
+
+def calculate_data_quality_score(db: Session, project_id: int, normalized_rows, field_mappings, issues):
+    from app.services.data_quality_service import calculate_data_quality_score as calculate
+
+    return calculate(db, project_id, normalized_rows, field_mappings, issues)
+
+
+def confirm_import_batch(db: Session, batch: ImportBatch, rows, payload: ImportConfirmRequest):
+    from app.services.import_confirm_service import confirm_import_batch as confirm
+
+    return confirm(db, batch, rows, payload)
+
+
+def build_error_report_workbook(db: Session, batch: ImportBatch):
+    from app.services.import_error_report_service import build_error_report_workbook as build
+
+    return build(db, batch)
+
+
+def apply_ai_fallback_to_columns(db: Session, project_id: int, columns):
+    from app.services.ai_column_resolver import apply_ai_fallback_to_columns as apply_fallback
+
+    return apply_fallback(db, project_id=project_id, columns=columns)
 
 
 class FreezeBatchRequest(BaseModel):

@@ -1,7 +1,10 @@
 import json
 from datetime import date
 
+from fastapi.testclient import TestClient
+
 from app.database import SessionLocal
+from app.main import app
 from app.models.baseline_plan import BaselinePlan
 from app.models.baseline_plan_snapshot import BaselinePlanSnapshot
 from app.models.import_batch import ImportBatch
@@ -158,3 +161,60 @@ def test_compute_snapshot_diff_reports_added_removed_and_changed() -> None:
     assert changed["plan_changes"]["planned_finish_date"]["before"] == "2026-04-01"
     assert changed["plan_changes"]["planned_finish_date"]["after"] == "2026-05-01"
     assert "actual_percent" in changed["actual_changes"]
+
+
+def test_create_baseline_from_current_batch_binds_items_and_creates_snapshot() -> None:
+    db = SessionLocal()
+    try:
+        project = Project(name="一键基线项目")
+        db.add(project)
+        db.flush()
+        batch = ImportBatch(
+            project_id=project.id,
+            file_name="plan.xlsx",
+            sheet_name="机电",
+            status="published",
+            is_active=True,
+            data_date=date(2026, 5, 20),
+            imported_count=2,
+        )
+        db.add(batch)
+        db.flush()
+        db.add_all(
+            [
+                ProgressItem(project_id=project.id, batch_id=batch.id, task_name="桥架", identity_key="a", actual_percent=10, planned_percent=20),
+                ProgressItem(project_id=project.id, batch_id=batch.id, task_name="配管", identity_key="b", actual_percent=30, planned_percent=40),
+            ]
+        )
+        db.commit()
+        project_id = project.id
+        batch_id = batch.id
+    finally:
+        db.close()
+
+    with TestClient(app) as client:
+        response = client.post(
+            f"/api/projects/{project_id}/baseline-plans/from-current-batch",
+            json={"batch_id": batch_id, "name": "5月计划基线", "set_default": True},
+        )
+
+    assert response.status_code == 201
+    payload = response.json()
+    assert payload["baseline"]["name"] == "5月计划基线"
+    assert payload["baseline"]["bound_batch_count"] == 1
+    assert payload["snapshot_item_count"] == 2
+
+    db = SessionLocal()
+    try:
+        baseline_id = payload["baseline"]["id"]
+        batch = db.get(ImportBatch, batch_id)
+        snapshot = db.get(BaselinePlanSnapshot, payload["snapshot_id"])
+        items = db.query(ProgressItem).filter(ProgressItem.batch_id == batch_id).all()
+        project = db.get(Project, project_id)
+    finally:
+        db.close()
+
+    assert batch.baseline_plan_id == baseline_id
+    assert project.default_baseline_plan_id == baseline_id
+    assert {item.baseline_plan_id for item in items} == {baseline_id}
+    assert snapshot.item_count == 2

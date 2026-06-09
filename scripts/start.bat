@@ -6,6 +6,7 @@ for %%I in ("%ROOT%") do set "ROOT=%%~fI"
 set "BACKEND_DIR=%ROOT%\backend"
 set "FRONTEND_DIR=%ROOT%\frontend"
 set "FRONTEND_DIST_DIR=%ROOT%\frontend_dist"
+set "VITE_CMD=%FRONTEND_DIR%\node_modules\.bin\vite.cmd"
 set "RUNTIME_DIR=%ROOT%\.runtime"
 set "LOG_DIR=%ROOT%\logs"
 if not defined BACKEND_PORT set "BACKEND_PORT=8000"
@@ -50,6 +51,8 @@ if exist "%FRONTEND_DIST_DIR%\index.html" (
 )
 if not exist "%RUNTIME_DIR%" mkdir "%RUNTIME_DIR%" >nul 2>nul
 if not exist "%LOG_DIR%" mkdir "%LOG_DIR%" >nul 2>nul
+call :try_reuse_runtime_state
+if "%RUNTIME_READY%"=="1" exit /b 0
 if exist "%FRONTEND_DIST_DIR%\index.html" (
   if not exist "%ROOT%\data" mkdir "%ROOT%\data" >nul 2>nul
   if not exist "%ROOT%\uploads" mkdir "%ROOT%\uploads" >nul 2>nul
@@ -75,15 +78,20 @@ if errorlevel 1 (
 echo 后端依赖：已找到
 
 if "%FRONTEND_MODE%"=="source" (
-  where npm >nul 2>nul
+  where node >nul 2>nul
   if errorlevel 1 (
-    echo [错误] 未找到 npm，请先安装 Node.js 或确认 npm 在 PATH 中。
+    echo [错误] 未找到 node，请先安装 Node.js 或确认 node 在 PATH 中。
     exit /b 1
   )
   if exist "%FRONTEND_DIR%\node_modules" (
     echo 前端依赖：已找到
   ) else (
     echo [错误] 前端依赖不存在：%FRONTEND_DIR%\node_modules
+    echo        请先在 frontend 目录执行 npm install。
+    exit /b 1
+  )
+  if not exist "%VITE_CMD%" (
+    echo [错误] 未找到 Vite 启动脚本：%VITE_CMD%
     echo        请先在 frontend 目录执行 npm install。
     exit /b 1
   )
@@ -136,7 +144,7 @@ if "%FRONTEND_MODE%"=="backend-static" (
   set "FRONTEND_OUT=%RUNTIME_DIR%\frontend.out.log"
   set "FRONTEND_ERR=%RUNTIME_DIR%\frontend.err.log"
   if "%FRONTEND_MODE%"=="source" (
-    powershell -NoProfile -Command "$env:VITE_API_BASE_URL='%BACKEND_URL%'; $p=Start-Process -FilePath 'cmd.exe' -ArgumentList @('/c','npm run dev -- --host 127.0.0.1 --port %FRONTEND_PORT%') -WorkingDirectory '%FRONTEND_DIR%' -RedirectStandardOutput '%FRONTEND_OUT%' -RedirectStandardError '%FRONTEND_ERR%' -PassThru -WindowStyle Hidden; Set-Content -Path '%RUNTIME_DIR%\frontend.pid' -Value $p.Id" >nul 2>nul
+    powershell -NoProfile -Command "$env:VITE_API_BASE_URL='%BACKEND_URL%'; $p=Start-Process -FilePath '%VITE_CMD%' -ArgumentList @('--host','127.0.0.1','--port','%FRONTEND_PORT%') -WorkingDirectory '%FRONTEND_DIR%' -RedirectStandardOutput '%FRONTEND_OUT%' -RedirectStandardError '%FRONTEND_ERR%' -PassThru -WindowStyle Hidden; Set-Content -Path '%RUNTIME_DIR%\frontend.pid' -Value $p.Id" >nul 2>nul
   ) else (
     powershell -NoProfile -Command "$p=Start-Process -FilePath '%PYTHON_EXE%' -ArgumentList @('-m','http.server','%FRONTEND_PORT%','--bind','127.0.0.1','--directory','%FRONTEND_DIST_DIR%') -WorkingDirectory '%ROOT%' -RedirectStandardOutput '%FRONTEND_OUT%' -RedirectStandardError '%FRONTEND_ERR%' -PassThru -WindowStyle Hidden; Set-Content -Path '%RUNTIME_DIR%\frontend.pid' -Value $p.Id" >nul 2>nul
   )
@@ -181,6 +189,8 @@ if not exist "%FRONTEND_DIST_DIR%\index.html" (
 )
 if not exist "%RUNTIME_DIR%" mkdir "%RUNTIME_DIR%" >nul 2>nul
 if not exist "%LOG_DIR%" mkdir "%LOG_DIR%" >nul 2>nul
+call :try_reuse_runtime_state
+if "%RUNTIME_READY%"=="1" exit /b 0
 if not exist "%ROOT%\data" mkdir "%ROOT%\data" >nul 2>nul
 if not exist "%ROOT%\uploads" mkdir "%ROOT%\uploads" >nul 2>nul
 if not exist "%ROOT%\exports" mkdir "%ROOT%\exports" >nul 2>nul
@@ -258,11 +268,21 @@ if not "%PICK_RESULT%"=="%PICK_START%" (
 )
 exit /b 0
 
+:try_reuse_runtime_state
+set "RUNTIME_READY=0"
+if not exist "%RUNTIME_DIR%\ports.json" exit /b 0
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$ErrorActionPreference='SilentlyContinue'; $state=Get-Content -LiteralPath '%RUNTIME_DIR%\ports.json' -Raw | ConvertFrom-Json; if(-not $state.backend_port){ exit 1 }; $backendUrl=if($state.backend_url){[string]$state.backend_url}else{'http://127.0.0.1:' + [string]$state.backend_port}; $primary=if($state.primary_url){[string]$state.primary_url}else{$backendUrl + '/'}; try { $h=Invoke-WebRequest -Uri ($backendUrl + '/api/health') -UseBasicParsing -TimeoutSec 1; $p=Invoke-WebRequest -Uri $primary -UseBasicParsing -TimeoutSec 1; if($h.StatusCode -ge 200 -and $h.StatusCode -lt 300 -and $p.StatusCode -ge 200 -and $p.StatusCode -lt 500){ Start-Process $primary; exit 0 } } catch { }; exit 1" >nul 2>nul
+if "%ERRORLEVEL%"=="0" (
+  echo 系统已运行，直接打开。
+  set "RUNTIME_READY=1"
+)
+exit /b 0
+
 :wait_url
 set "URL_READY=0"
 set "CHECK_URL=%~1"
 set "CHECK_NAME=%~2"
-powershell -NoProfile -Command "$ok=$false; for($i=0; $i -lt 30; $i++){ try { $r=Invoke-WebRequest -Uri '%CHECK_URL%' -UseBasicParsing -TimeoutSec 2; if($r.StatusCode -ge 200 -and $r.StatusCode -lt 500){ $ok=$true; break } } catch { }; Start-Sleep -Seconds 1 }; if($ok){ exit 0 } else { exit 1 }" >nul 2>nul
+powershell -NoProfile -Command "$ok=$false; $deadline=(Get-Date).AddSeconds(30); while((Get-Date) -lt $deadline){ try { $r=Invoke-WebRequest -Uri '%CHECK_URL%' -UseBasicParsing -TimeoutSec 2; if($r.StatusCode -ge 200 -and $r.StatusCode -lt 500){ $ok=$true; break } } catch { }; Start-Sleep -Milliseconds 250 }; if($ok){ exit 0 } else { exit 1 }" >nul 2>nul
 if errorlevel 1 (
   echo [错误] %CHECK_NAME% 超时：%CHECK_URL%
   exit /b 0
@@ -280,7 +300,7 @@ for /L %%I in (1,1,10) do (
     for /f "tokens=5" %%P in ('netstat -ano ^| findstr /R /C:":%LISTEN_PORT% .*LISTENING"') do (
       if not defined LISTEN_PID set "LISTEN_PID=%%P"
     )
-    if not defined LISTEN_PID powershell -NoProfile -Command "Start-Sleep -Milliseconds 500" >nul 2>nul
+    if not defined LISTEN_PID powershell -NoProfile -Command "Start-Sleep -Milliseconds 100" >nul 2>nul
   )
 )
 if defined LISTEN_PID (

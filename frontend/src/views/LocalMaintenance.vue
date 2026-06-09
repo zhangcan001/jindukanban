@@ -89,6 +89,20 @@
           </div>
         </template>
       </div>
+      <el-alert
+        v-if="cleanupSuggestion"
+        class="parse-hint"
+        :title="cleanupSuggestion"
+        type="warning"
+        show-icon
+        :closable="false"
+      >
+        <template #default>
+          <el-button size="small" :loading="cleaning === 'unpublished_batches'" @click="handleSafeCleanup('unpublished_batches')">
+            预览并清理未发布批次
+          </el-button>
+        </template>
+      </el-alert>
     </section>
 
     <section class="table-surface">
@@ -458,12 +472,22 @@ const restoreStep = computed(() => {
 const canRestoreSelectedBackup = computed(() =>
   selectedBackup.value?.validation_status === '完整' && restoreConfirmText.value === '我确认恢复备份',
 )
+const cleanupSuggestion = computed(() => {
+  const health = dataHealth.value
+  if (!health) return ''
+  const draft = Number(health.draft_batch_count || 0)
+  const imported = Number(health.imported_unpublished_batch_count || 0)
+  const parsed = Number(health.parsed_batch_count || 0)
+  const total = draft + imported + parsed
+  if (total <= 0) return ''
+  return `发现 ${total} 个未发布批次：草稿 ${draft} 个、已解析 ${parsed} 个、已导入未发布 ${imported} 个。建议先 dry-run 预览，再清理无用历史导入。`
+})
 const healthGroups = computed(() => {
   const health = dataHealth.value
   if (!health) return []
   return [
     { title: '项目数据', items: [['项目数', health.project_count], ['正常项目', health.active_project_count], ['归档项目', health.archived_project_count]] },
-    { title: '导入批次', items: [['导入批次', health.import_batch_count], ['已发布', health.published_batch_count], ['未发布', health.unpublished_batch_count], ['冻结批次', health.frozen_batch_count], ['未冻结', health.unfrozen_batch_count]] },
+    { title: '导入批次', items: [['导入批次', health.import_batch_count], ['已发布', health.published_batch_count], ['未发布', health.unpublished_batch_count], ['草稿', health.draft_batch_count], ['已解析未导入', health.parsed_batch_count], ['已导入未发布', health.imported_unpublished_batch_count], ['冻结批次', health.frozen_batch_count], ['未冻结', health.unfrozen_batch_count]] },
     { title: '业务数据', items: [['进度明细', health.progress_item_count], ['预警记录', health.warning_record_count], ['整改项', health.rectification_item_count], ['报表记录', health.report_export_count]] },
     { title: '文件目录', items: [['孤立批次', health.orphan_batch_count], ['孤立明细', health.orphan_item_count], ['缺失文件', health.missing_file_count], ['临时文件', health.temp_file_count], ['数据库大小', formatBytes(health.database_size)], ['上传目录', formatBytes(health.upload_dir_size)], ['导出目录', formatBytes(health.export_dir_size)]] },
     { title: '备份状态', items: [['备份数量', health.total_backup_count], ['不完整备份', health.incomplete_backup_count], ['备份目录', formatBytes(health.backup_dir_size)]] },

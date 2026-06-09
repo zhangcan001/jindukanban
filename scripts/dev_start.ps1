@@ -8,6 +8,7 @@ $backendPort = if ($env:BACKEND_PORT) { [int]$env:BACKEND_PORT } else { 8000 }
 $frontendPort = if ($env:FRONTEND_PORT) { [int]$env:FRONTEND_PORT } else { 5173 }
 $portFallbackAttempts = 10
 $pythonExe = Join-Path $backendDir ".venv\Scripts\python.exe"
+$viteCmd = Join-Path $frontendDir "node_modules\.bin\vite.cmd"
 
 Write-Host "========================================"
 Write-Host "工程进度看板开发启动"
@@ -39,11 +40,12 @@ function Wait-UrlReady {
     [switch]$AllowClientError
   )
 
-  for ($i = 0; $i -lt $TimeoutSeconds; $i++) {
+  $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+  while ((Get-Date) -lt $deadline) {
     if (Test-UrlReady -Url $Url -AllowClientError:$AllowClientError) {
       return $true
     }
-    Start-Sleep -Seconds 1
+    Start-Sleep -Milliseconds 250
   }
 
   Write-Host "[错误] $Name 超时：$Url"
@@ -114,10 +116,52 @@ function Write-ListeningPid {
       Set-Content -LiteralPath $PidFile -Value $connection.OwningProcess
       return
     }
-    Start-Sleep -Milliseconds 500
+    Start-Sleep -Milliseconds 100
   }
 
   Write-Host "[警告] 未能识别$ServiceName实际监听 PID，停止脚本可能需要手动处理。"
+}
+
+function Open-UrlDetached {
+  param([string]$Url)
+
+  try {
+    Start-Process -FilePath $Url | Out-Null
+  } catch {
+    Write-Host "[警告] 自动打开浏览器失败，请手动访问：$Url"
+  }
+}
+
+function Try-ReuseRuntimeState {
+  $portsFile = Join-Path $runtimeDir "ports.json"
+  if (-not (Test-Path -LiteralPath $portsFile)) {
+    return $false
+  }
+
+  try {
+    $state = Get-Content -LiteralPath $portsFile -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+    $stateBackendPort = [int]$state.backend_port
+    $stateFrontendPort = if ($state.frontend_port) { [int]$state.frontend_port } else { 0 }
+    $stateBackendUrl = if ($state.backend_url) { [string]$state.backend_url } else { "http://127.0.0.1:$stateBackendPort" }
+    $stateFrontendUrl = if ($state.primary_url) { [string]$state.primary_url } elseif ($stateFrontendPort -gt 0) { "http://127.0.0.1:$stateFrontendPort/" } else { "$stateBackendUrl/" }
+  } catch {
+    return $false
+  }
+
+  if ($stateBackendPort -le 0 -or -not (Test-UrlReady -Url "$stateBackendUrl/api/health")) {
+    return $false
+  }
+  if (-not (Test-UrlReady -Url $stateFrontendUrl -AllowClientError)) {
+    return $false
+  }
+
+  Write-Host "系统已运行，直接打开。"
+  Open-UrlDetached $stateFrontendUrl
+  return $true
+}
+
+if (Try-ReuseRuntimeState) {
+  exit 0
 }
 
 if (-not (Test-Path -LiteralPath (Join-Path $backendDir "app\main.py"))) {
@@ -136,12 +180,17 @@ if (-not (Test-Path -LiteralPath $pythonExe)) {
   Write-Host "       请先创建虚拟环境并安装 backend\requirements.txt。"
   exit 1
 }
-if (-not (Get-Command npm -ErrorAction SilentlyContinue)) {
-  Write-Host "[错误] 未找到 npm，请先安装 Node.js 或确认 npm 在 PATH 中。"
+if (-not (Get-Command node -ErrorAction SilentlyContinue)) {
+  Write-Host "[错误] 未找到 node，请先安装 Node.js 或确认 node 在 PATH 中。"
   exit 1
 }
 if (-not (Test-Path -LiteralPath (Join-Path $frontendDir "node_modules"))) {
   Write-Host "[错误] 前端依赖不存在：$frontendDir\node_modules"
+  Write-Host "       请先在 frontend 目录执行 npm install。"
+  exit 1
+}
+if (-not (Test-Path -LiteralPath $viteCmd)) {
+  Write-Host "[错误] 未找到 Vite 启动脚本：$viteCmd"
   Write-Host "       请先在 frontend 目录执行 npm install。"
   exit 1
 }
@@ -198,7 +247,7 @@ $frontendUrl = "http://127.0.0.1:$frontendPort"
 if (Test-UrlReady -Url "$frontendUrl/" -AllowClientError) {
   Write-Host "前端已运行，跳过启动。"
   & (Join-Path $PSScriptRoot "write_runtime_state.ps1") -RuntimeDir $runtimeDir -BackendPort $backendPort -FrontendPort $frontendPort -PrimaryUrl "$frontendUrl/" -Mode "source"
-  Start-Process $frontendUrl
+  Open-UrlDetached $frontendUrl
   exit 0
 }
 
@@ -211,7 +260,7 @@ if ($frontendPortStatus -eq "project") {
   }
   Write-Host "前端已运行，跳过启动。"
   & (Join-Path $PSScriptRoot "write_runtime_state.ps1") -RuntimeDir $runtimeDir -BackendPort $backendPort -FrontendPort $frontendPort -PrimaryUrl "$frontendUrl/" -Mode "source"
-  Start-Process $frontendUrl
+  Open-UrlDetached $frontendUrl
   exit 0
 }
 
@@ -220,7 +269,7 @@ $frontendOut = Join-Path $runtimeDir "frontend.out.log"
 $frontendErr = Join-Path $runtimeDir "frontend.err.log"
 $env:VITE_API_BASE_URL = $backendUrl
 try {
-  $frontendProcess = Start-Process -FilePath "cmd.exe" -ArgumentList @("/c", "npm run dev -- --host 127.0.0.1 --port $frontendPort") -WorkingDirectory $frontendDir -RedirectStandardOutput $frontendOut -RedirectStandardError $frontendErr -PassThru -WindowStyle Hidden
+  $frontendProcess = Start-Process -FilePath $viteCmd -ArgumentList @("--host", "127.0.0.1", "--port", "$frontendPort") -WorkingDirectory $frontendDir -RedirectStandardOutput $frontendOut -RedirectStandardError $frontendErr -PassThru -WindowStyle Hidden
   Set-Content -LiteralPath (Join-Path $runtimeDir "frontend.pid") -Value $frontendProcess.Id
 } catch {
   Write-Host "[错误] 前端启动命令执行失败。"
@@ -237,5 +286,5 @@ Write-ListeningPid -Port $frontendPort -PidFile (Join-Path $runtimeDir "frontend
 Write-Host "系统已启动。"
 Write-Host "访问地址：$frontendUrl"
 & (Join-Path $PSScriptRoot "write_runtime_state.ps1") -RuntimeDir $runtimeDir -BackendPort $backendPort -FrontendPort $frontendPort -PrimaryUrl "$frontendUrl/" -Mode "source"
-Start-Process $frontendUrl
+Open-UrlDetached $frontendUrl
 exit 0

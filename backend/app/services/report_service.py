@@ -36,6 +36,16 @@ from app.models.report_export_record import ReportExportRecord
 from app.schemas.report import ReportConfig
 from app.models.warning_record import WarningRecord
 from app.models.warning_rule import WarningRule
+from app.services.report_metadata import (
+    DASHBOARD_EXCEL_TYPE,
+    DELAY_RECTIFICATION_EXCEL_TYPE,
+    REPORT_TYPES,
+    STANDARD_EXCEL_REPORT_TYPES,
+    WEEKLY_PDF_TYPE,
+    WEEKLY_WORD_TYPE,
+    resolve_report_config,
+    serialize_report_config,
+)
 from app.services.analytics_service import (
     aggregate_progress,
     apply_time_based_progress,
@@ -63,59 +73,6 @@ from app.services.ai_service import build_ai_insight_payload, fallback_insight_t
 from app.services.warning_service import is_data_quality_warning_record
 
 REPORT_DIR = Path(get_settings().export_dir)
-
-DASHBOARD_EXCEL_TYPE = "dashboard_excel"
-WEEKLY_WORD_TYPE = "weekly_word"
-WEEKLY_PDF_TYPE = "weekly_pdf"
-DELAY_RECTIFICATION_EXCEL_TYPE = "delay_rectification_excel"
-
-REPORT_TYPES = {
-    "overview": {"label": "进度总览报表", "extension": "xlsx"},
-    "delayed-ranking": {"label": "滞后项报表", "extension": "xlsx"},
-    "discipline-summary": {"label": "专业进度报表", "extension": "xlsx"},
-    "progress-items": {"label": "进度明细报表", "extension": "xlsx"},
-    DASHBOARD_EXCEL_TYPE: {"label": "当前看板 Excel", "extension": "xlsx"},
-    WEEKLY_WORD_TYPE: {"label": "Word 周报", "extension": "docx"},
-    WEEKLY_PDF_TYPE: {"label": "PDF 周报", "extension": "pdf"},
-    DELAY_RECTIFICATION_EXCEL_TYPE: {"label": "滞后项整改清单", "extension": "xlsx"},
-}
-
-STANDARD_EXCEL_REPORT_TYPES = {"overview", "delayed-ranking", "discipline-summary", "progress-items"}
-
-
-def resolve_report_config(raw_config: str | None) -> ReportConfig:
-    if not raw_config:
-        return ReportConfig()
-    try:
-        parsed = json.loads(raw_config)
-    except json.JSONDecodeError:
-        return ReportConfig()
-    if not isinstance(parsed, dict):
-        return ReportConfig()
-    aliases = {
-        "include_dashboard_plus": "include_advanced_chart_analysis",
-        "include_advanced_analysis": "include_advanced_chart_analysis",
-        "delayed_item_limit": "weekly_delayed_item_limit",
-        "matrix_summary_limit": "weekly_matrix_summary_limit",
-        "show_quality_section": "show_data_quality_section",
-        "show_rectification": "show_rectification_summary",
-    }
-    normalized = dict(parsed)
-    for old_key, new_key in aliases.items():
-        if old_key in normalized and new_key not in normalized:
-            normalized[new_key] = normalized[old_key]
-    for key in ("weekly_delayed_item_limit", "weekly_matrix_summary_limit"):
-        try:
-            normalized[key] = max(0, int(normalized.get(key, ReportConfig().model_dump()[key])))
-        except (TypeError, ValueError):
-            normalized.pop(key, None)
-    if normalized.get("default_export_format") not in {"xlsx", "docx"}:
-        normalized["default_export_format"] = "xlsx"
-    return ReportConfig.model_validate(normalized)
-
-
-def serialize_report_config(config: ReportConfig) -> str:
-    return json.dumps(config.model_dump(), ensure_ascii=False)
 
 
 def create_report(
@@ -1913,7 +1870,7 @@ def _filter_delay_rectification_items(items: list[ProgressItem], filters: dict[s
     if filters.get("floor"):
         filtered = [item for item in filtered if display_text(item.floor, "未填写楼层") == filters["floor"]]
     if filters.get("delay_level"):
-        filtered = [item for item in filtered if _delay_level_value(item) == filters["delay_level"]]
+        filtered = [item for item in filtered if _delay_level_matches(_delay_level_value(item), filters["delay_level"])]
     return filtered
 
 
@@ -1930,7 +1887,11 @@ def _filter_dashboard_scope_items(items: list[ProgressItem], filters: dict[str, 
     if filters.get("system_name"):
         filtered = [item for item in filtered if display_text(item.system_name, "未填写系统") == filters["system_name"]]
     if filters.get("delay_level"):
-        filtered = [item for item in filtered if _delay_level_value(item) == filters["delay_level"] or item.status == filters["delay_level"]]
+        filtered = [
+            item
+            for item in filtered
+            if _delay_level_matches(_delay_level_value(item), filters["delay_level"]) or item.status == filters["delay_level"]
+        ]
     return filtered
 
 
@@ -1942,7 +1903,7 @@ def _filter_dashboard_rectifications(items: list[RectificationItem], filters: di
         if filters.get(field):
             filtered = [item for item in filtered if display_text(getattr(item, field), "未填写") == filters[field]]
     if filters.get("delay_level"):
-        filtered = [item for item in filtered if item.delay_level == filters["delay_level"]]
+        filtered = [item for item in filtered if _delay_level_matches(item.delay_level, filters["delay_level"])]
     return filtered
 
 
@@ -1964,6 +1925,16 @@ def _delay_level_value(item: ProgressItem) -> str:
         return "not_started_by_plan"
     level, _ = delay_level_for_deviation(item.progress_deviation)
     return level or item.status or "unknown"
+
+
+def _delay_level_matches(actual: str | None, requested: str | None) -> bool:
+    if actual == requested:
+        return True
+    if requested == "delayed_or_worse":
+        return actual in {"seriously_delayed", "delayed"}
+    if requested == "any_delayed":
+        return actual in {"seriously_delayed", "delayed", "slightly_delayed"}
+    return False
 
 
 def _clean_filter(value: str | None) -> str | None:
@@ -2053,6 +2024,8 @@ def _status_label(value: str | None) -> str:
         "normal": "正常",
         "slightly_delayed": "轻微滞后",
         "delayed": "明显滞后",
+        "delayed_or_worse": "明显及以上滞后",
+        "any_delayed": "全部滞后",
         "seriously_delayed": "严重滞后",
         "seriously_delay": "严重滞后",
         "not_started_by_plan": "未到计划开始",

@@ -183,7 +183,12 @@ def confirm_import_batch(
     baseline_plan_id = baseline_plan.id if baseline_plan else None
 
     selected_template_id = payload.mapping_template_id or batch.mapping_template_id
-    template_id = _save_mapping_template(db, batch, payload) if payload.save_as_template else selected_template_id
+    if payload.save_as_template:
+        template_id = _save_mapping_template(db, batch, payload)
+    elif selected_template_id:
+        template_id = selected_template_id
+    else:
+        template_id = _auto_save_mapping_template(db, batch, payload)
     if selected_template_id:
         mark_template_used(db, selected_template_id)
     record_aliases_bulk(
@@ -387,6 +392,7 @@ def _resolve_baseline_plan(db: Session, project_id: int, requested_baseline_id: 
 def _save_mapping_template(db: Session, batch: ImportBatch, payload: ImportConfirmRequest) -> int:
     project_id = batch.project_id
     project = db.get(Project, project_id)
+    header_hash = compute_header_hash([mapping.excel_column_name for mapping in payload.field_mappings])
     diagnostics = build_mapping_diagnostics(_template_batch(project_id, batch, payload), payload.field_mappings, [])
     template = MappingTemplate(
         project_id=project_id,
@@ -394,35 +400,8 @@ def _save_mapping_template(db: Session, batch: ImportBatch, payload: ImportConfi
         description="由正式导入保存",
         project_type=project.project_type if project else None,
         sheet_name=payload.sheet_name or batch.sheet_name,
-        header_hash=compute_header_hash([mapping.excel_column_name for mapping in payload.field_mappings]),
-        field_structure=json.dumps(
-            {
-                "sheet_name": payload.sheet_name or batch.sheet_name,
-                "original_columns": [mapping.excel_column_name for mapping in payload.field_mappings],
-                "system_fields": [mapping.system_field_name for mapping in payload.field_mappings if mapping.system_field_name],
-                "columns": [
-                    {
-                        "excel_column_name": mapping.excel_column_name,
-                        "system_field_name": mapping.system_field_name,
-                        "field_type": mapping.field_type,
-                        "is_dimension": mapping.is_dimension,
-                        "is_metric": mapping.is_metric,
-                        "is_required": mapping.is_required,
-                        "save_to_extra": mapping.save_to_extra,
-                        "sort_order": mapping.sort_order,
-                    }
-                    for mapping in payload.field_mappings
-                ],
-                "header_row_index": batch.header_row_index,
-                "data_start_row_index": batch.data_start_row_index,
-                "recommended_calculation_method": diagnostics.get("recommended_calculation_method"),
-                "recommended_calculation_method_name": diagnostics.get("recommended_calculation_method_name"),
-                "available_calculation_methods": diagnostics.get("available_calculation_methods"),
-                "field_completeness_summary": diagnostics.get("field_completeness_summary"),
-                "field_mapping_quality": diagnostics.get("field_mapping_quality"),
-            },
-            ensure_ascii=False,
-        ),
+        header_hash=header_hash,
+        field_structure=_mapping_template_structure(batch, payload, diagnostics),
         is_global=False,
         is_active=True,
         last_used_at=datetime.now(),
@@ -445,6 +424,109 @@ def _save_mapping_template(db: Session, batch: ImportBatch, payload: ImportConfi
             )
         )
     return template.id
+
+
+def _auto_save_mapping_template(db: Session, batch: ImportBatch, payload: ImportConfirmRequest) -> int | None:
+    header_hash = compute_header_hash([mapping.excel_column_name for mapping in payload.field_mappings])
+    if not header_hash:
+        return None
+
+    project = db.get(Project, batch.project_id)
+    sheet_name = payload.sheet_name or batch.sheet_name
+    diagnostics = build_mapping_diagnostics(_template_batch(batch.project_id, batch, payload), payload.field_mappings, [])
+    existing = db.scalars(
+        select(MappingTemplate)
+        .where(
+            MappingTemplate.project_id == batch.project_id,
+            MappingTemplate.header_hash == header_hash,
+            MappingTemplate.is_active.is_(True),
+        )
+        .order_by(MappingTemplate.last_used_at.desc().nullslast(), MappingTemplate.id.desc())
+    ).first()
+
+    if existing is not None:
+        existing.sheet_name = existing.sheet_name or sheet_name
+        existing.field_structure = _mapping_template_structure(batch, payload, diagnostics)
+        existing.project_type = existing.project_type or (project.project_type if project else None)
+        _replace_mapping_fields(db, existing.id, payload)
+        mark_template_used(db, existing.id)
+        return existing.id
+
+    template = MappingTemplate(
+        project_id=batch.project_id,
+        name=_auto_template_name(batch),
+        description="导入成功后自动保存",
+        project_type=project.project_type if project else None,
+        sheet_name=sheet_name,
+        header_hash=header_hash,
+        field_structure=_mapping_template_structure(batch, payload, diagnostics),
+        is_global=False,
+        is_active=True,
+        last_used_at=datetime.now(),
+        use_count=1,
+    )
+    db.add(template)
+    db.flush()
+    _add_mapping_fields(db, template.id, payload)
+    return template.id
+
+
+def _mapping_template_structure(batch: ImportBatch, payload: ImportConfirmRequest, diagnostics: dict[str, Any]) -> str:
+    return json.dumps(
+        {
+            "sheet_name": payload.sheet_name or batch.sheet_name,
+            "original_columns": [mapping.excel_column_name for mapping in payload.field_mappings],
+            "system_fields": [mapping.system_field_name for mapping in payload.field_mappings if mapping.system_field_name],
+            "columns": [
+                {
+                    "excel_column_name": mapping.excel_column_name,
+                    "system_field_name": mapping.system_field_name,
+                    "field_type": mapping.field_type,
+                    "is_dimension": mapping.is_dimension,
+                    "is_metric": mapping.is_metric,
+                    "is_required": mapping.is_required,
+                    "save_to_extra": mapping.save_to_extra,
+                    "sort_order": mapping.sort_order,
+                }
+                for mapping in payload.field_mappings
+            ],
+            "header_row_index": batch.header_row_index,
+            "data_start_row_index": batch.data_start_row_index,
+            "recommended_calculation_method": diagnostics.get("recommended_calculation_method"),
+            "recommended_calculation_method_name": diagnostics.get("recommended_calculation_method_name"),
+            "available_calculation_methods": diagnostics.get("available_calculation_methods"),
+            "field_completeness_summary": diagnostics.get("field_completeness_summary"),
+            "field_mapping_quality": diagnostics.get("field_mapping_quality"),
+        },
+        ensure_ascii=False,
+    )
+
+
+def _add_mapping_fields(db: Session, template_id: int, payload: ImportConfirmRequest) -> None:
+    for mapping in payload.field_mappings:
+        db.add(
+            MappingField(
+                template_id=template_id,
+                excel_column_name=mapping.excel_column_name,
+                system_field_name=mapping.system_field_name,
+                field_type=mapping.field_type,
+                is_dimension=mapping.is_dimension,
+                is_metric=mapping.is_metric,
+                is_required=mapping.is_required,
+                save_to_extra=mapping.save_to_extra,
+                sort_order=mapping.sort_order,
+            )
+        )
+
+
+def _replace_mapping_fields(db: Session, template_id: int, payload: ImportConfirmRequest) -> None:
+    db.execute(delete(MappingField).where(MappingField.template_id == template_id))
+    _add_mapping_fields(db, template_id, payload)
+
+
+def _auto_template_name(batch: ImportBatch) -> str:
+    sheet = batch.sheet_name or "默认Sheet"
+    return f"{sheet} 自动字段模板"
 
 
 def _template_batch(project_id: int, batch: ImportBatch, payload: ImportConfirmRequest) -> ImportBatch:
