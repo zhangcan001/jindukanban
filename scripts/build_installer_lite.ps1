@@ -38,7 +38,7 @@ foreach ($dir in @("frontend_dist", "scripts", "data", "uploads", "exports", "ba
   New-Item -ItemType Directory -Force -Path (Join-Path $app $dir) | Out-Null
 }
 
-Invoke-Robocopy (Join-Path $rootPath "backend") (Join-Path $app "backend") @("/E", "/XD", "__pycache__", ".pytest_cache", "uploads", "reports", "/XF", "*.pyc", "*.pyo", "progress_dashboard.db", "test_progress_dashboard.db", "*.log", "*.out.log", "*.err.log")
+Invoke-Robocopy (Join-Path $rootPath "backend") (Join-Path $app "backend") @("/E", "/XD", "__pycache__", ".pytest_cache", "uploads", "reports", "/XF", "*.pyc", "*.pyo", "progress_dashboard.db", "progress_dashboard.db-*", "test_progress_dashboard.db", "test_progress_dashboard.db-*", "*.log", "*.out.log", "*.err.log")
 if (-not (Test-Path -LiteralPath (Join-Path $app "backend\app\main.py"))) {
   Copy-Item -LiteralPath (Join-Path $rootPath "backend\app") -Destination (Join-Path $app "backend\app") -Recurse -Force
 }
@@ -52,7 +52,7 @@ if (Test-Path -LiteralPath (Join-Path $rootPath "backend\.venv")) {
     Copy-Item -LiteralPath $_.FullName -Destination $targetVenv -Recurse -Force
   }
 }
-foreach ($item in @("progress_dashboard.db", "test_progress_dashboard.db", "uvicorn*.log", "uvicorn*.out.log", "uvicorn*.err.log")) {
+foreach ($item in @("progress_dashboard.db", "progress_dashboard.db-*", "test_progress_dashboard.db", "test_progress_dashboard.db-*", "uvicorn*.log", "uvicorn*.out.log", "uvicorn*.err.log")) {
   Get-ChildItem -LiteralPath (Join-Path $app "backend") -Filter $item -File -ErrorAction SilentlyContinue | Remove-Item -Force
 }
 foreach ($dir in @("__pycache__", ".pytest_cache", "uploads", "reports", "backups")) {

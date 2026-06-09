@@ -51,8 +51,9 @@ if exist "%FRONTEND_DIST_DIR%\index.html" (
 )
 if not exist "%RUNTIME_DIR%" mkdir "%RUNTIME_DIR%" >nul 2>nul
 if not exist "%LOG_DIR%" mkdir "%LOG_DIR%" >nul 2>nul
-call :try_reuse_runtime_state
-if "%RUNTIME_READY%"=="1" exit /b 0
+set "RUNTIME_READY=0"
+if exist "%RUNTIME_DIR%\ports.json" call :try_reuse_runtime_state
+if "!RUNTIME_READY!"=="1" exit /b 0
 if exist "%FRONTEND_DIST_DIR%\index.html" (
   if not exist "%ROOT%\data" mkdir "%ROOT%\data" >nul 2>nul
   if not exist "%ROOT%\uploads" mkdir "%ROOT%\uploads" >nul 2>nul
@@ -189,8 +190,9 @@ if not exist "%FRONTEND_DIST_DIR%\index.html" (
 )
 if not exist "%RUNTIME_DIR%" mkdir "%RUNTIME_DIR%" >nul 2>nul
 if not exist "%LOG_DIR%" mkdir "%LOG_DIR%" >nul 2>nul
-call :try_reuse_runtime_state
-if "%RUNTIME_READY%"=="1" exit /b 0
+set "RUNTIME_READY=0"
+if exist "%RUNTIME_DIR%\ports.json" call :try_reuse_runtime_state
+if "!RUNTIME_READY!"=="1" exit /b 0
 if not exist "%ROOT%\data" mkdir "%ROOT%\data" >nul 2>nul
 if not exist "%ROOT%\uploads" mkdir "%ROOT%\uploads" >nul 2>nul
 if not exist "%ROOT%\exports" mkdir "%ROOT%\exports" >nul 2>nul
@@ -270,9 +272,8 @@ exit /b 0
 
 :try_reuse_runtime_state
 set "RUNTIME_READY=0"
-if not exist "%RUNTIME_DIR%\ports.json" exit /b 0
 powershell -NoProfile -ExecutionPolicy Bypass -Command "$ErrorActionPreference='SilentlyContinue'; $state=Get-Content -LiteralPath '%RUNTIME_DIR%\ports.json' -Raw | ConvertFrom-Json; if(-not $state.backend_port){ exit 1 }; $backendUrl=if($state.backend_url){[string]$state.backend_url}else{'http://127.0.0.1:' + [string]$state.backend_port}; $primary=if($state.primary_url){[string]$state.primary_url}else{$backendUrl + '/'}; try { $h=Invoke-WebRequest -Uri ($backendUrl + '/api/health') -UseBasicParsing -TimeoutSec 1; $p=Invoke-WebRequest -Uri $primary -UseBasicParsing -TimeoutSec 1; if($h.StatusCode -ge 200 -and $h.StatusCode -lt 300 -and $p.StatusCode -ge 200 -and $p.StatusCode -lt 500){ Start-Process $primary; exit 0 } } catch { }; exit 1" >nul 2>nul
-if "%ERRORLEVEL%"=="0" (
+if not errorlevel 1 (
   echo 系统已运行，直接打开。
   set "RUNTIME_READY=1"
 )
@@ -295,9 +296,9 @@ set "LISTEN_PORT=%~1"
 set "PID_FILE=%~2"
 set "SERVICE_NAME=%~3"
 set "LISTEN_PID="
-for /L %%I in (1,1,10) do (
+for /L %%I in (1,1,20) do (
   if not defined LISTEN_PID (
-    for /f "tokens=5" %%P in ('netstat -ano ^| findstr /R /C:":%LISTEN_PORT% .*LISTENING"') do (
+    for /f "delims=" %%P in ('powershell -NoProfile -Command "$c=@(Get-NetTCPConnection -State Listen -LocalPort %LISTEN_PORT% -ErrorAction SilentlyContinue); if($c.Count -gt 0){$c[0].OwningProcess}"') do (
       if not defined LISTEN_PID set "LISTEN_PID=%%P"
     )
     if not defined LISTEN_PID powershell -NoProfile -Command "Start-Sleep -Milliseconds 100" >nul 2>nul

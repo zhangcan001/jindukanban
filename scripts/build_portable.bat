@@ -33,7 +33,7 @@ mkdir "%TARGET%" >nul 2>nul
 mkdir "%TARGET%\frontend_dist" "%TARGET%\scripts" "%TARGET%\docs" "%TARGET%\data" "%TARGET%\uploads" "%TARGET%\exports" "%TARGET%\backups" "%TARGET%\logs" >nul 2>nul
 
 echo [1/7] Copy backend...
-robocopy "%ROOT%\backend" "%TARGET%\backend" /E /XD "__pycache__" ".pytest_cache" "uploads" "reports" "backups" /XF "*.pyc" "*.pyo" "progress_dashboard.db" "test_progress_dashboard.db" "*.log" "*.out.log" "*.err.log" >nul
+robocopy "%ROOT%\backend" "%TARGET%\backend" /E /XD "__pycache__" ".pytest_cache" "uploads" "reports" "backups" /XF "*.pyc" "*.pyo" "progress_dashboard.db" "progress_dashboard.db-*" "test_progress_dashboard.db" "test_progress_dashboard.db-*" "*.log" "*.out.log" "*.err.log" >nul
 if errorlevel 8 (
   echo [ERROR] backend copy failed.
   exit /b 1
